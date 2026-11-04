@@ -1,0 +1,51 @@
+%YAML 1.2
+---
+schema: 1
+downstream:
+  remote: origin
+  branch: downstream
+  recovery_tag_prefix: forkctl/recovery
+  publish: append
+upstream:
+  remote: upstream
+  url: https://github.com/tailscale/tailscale.git
+  fetch_ref: refs/heads/release-branch/1.104
+base:
+  target:
+    kind: tag
+    selector: refs/tags/v1.104.1
+    commit: 9a522a9786c97eb7910c01ccb7bd66557b04c910
+    tag_object: 7f4efe814ff14b064eb080344389ceb9ea2d37ac
+  canonical: 9a522a9786c97eb7910c01ccb7bd66557b04c910
+  stack: 9a522a9786c97eb7910c01ccb7bd66557b04c910
+documents:
+  ledger: PATCHES.md
+  exports: patches/downstream
+bookkeeping_patch: fork-tooling
+patches:
+  - name: exit-hook
+    kind: source
+    purpose: "Let an embedder handle a control-ordered Debug.Exit: controlclient.ExitHook, when set, is called instead of os.Exit, so shephrd stops its tsnet node and keeps its process, its local socket and its panes."
+    upstream_status: not-submitted
+    drop_when: >-
+      Upstream tsnet or controlclient offers an embedder exit handler that replaces
+      os.Exit on Debug.Exit.
+    scope:
+      - control/controlclient/direct.go
+      - control/controlclient/direct_test.go
+  - name: fork-tooling
+    kind: tooling
+    purpose: Own fork policy, generated evidence, and integration configuration.
+    upstream_status: "inappropriate: downstream-only fork maintenance"
+    drop_when: The downstream fork is retired.
+    scope:
+      - patches/fork.yaml
+      - PATCHES.md
+      - patches/downstream/**
+      - mise.toml
+      - AGENTS.md
+disabled_patches: []
+history: []
+contracts:
+  allow_base: []
+  required_text: []
