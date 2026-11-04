@@ -1,0 +1,217 @@
+// The messages between shephrdd and its tailnet package, version 1.
+//
+// They travel on the control socketpair in frames: a 4-byte little-endian
+// body length, then one Command (core to package) or Event (package to
+// core). The rules in shephrd/tailnet/README.md apply: additions only within
+// v1, fields in number order, no map fields, an UNSPECIFIED zero value in
+// every enum, reserved numbers for removed fields, and a comment on every
+// element.
+syntax = "proto3";
+
+package shephrd.tailnet.v1;
+
+option go_package = "tailscale.com/shephrd/tailnet/tailnetpb";
+
+// Every message the core sends to the package.
+message Command {
+  // The command; an arm the package does not know is ignored.
+  oneof body {
+    // Starts the node.
+    Up up = 1;
+    // Stops the node and keeps its state.
+    Down down = 2;
+    // Asks the control server for a new sign-in link.
+    Login login = 3;
+    // Signs the node out and forgets its identity.
+    Logout logout = 4;
+    // Opens a connection to another node.
+    Dial dial = 5;
+  }
+}
+
+// Every message the package sends to the core.
+message Event {
+  // The event; an arm the core does not know is ignored.
+  oneof body {
+    // The package's first message.
+    Hello hello = 1;
+    // The node listens on the core's port.
+    Ready ready = 2;
+    // The node's state after a change.
+    State state = 3;
+    // A connection arrived; its descriptor travels on the connections socket.
+    Caller caller = 4;
+    // A dial connected; its descriptor travels on the connections socket.
+    Dialed dialed = 5;
+    // A dial failed.
+    DialFailed dial_failed = 6;
+    // Peers of the tailnet changed.
+    PeersChanged peers_changed = 7;
+    // The process received a signal the package owns.
+    Signal signal = 8;
+  }
+}
+
+// The package's first message on the control socket.
+message Hello {
+  // The C interface's version, which the core compares with its own.
+  uint32 abi = 1;
+  // The package's build: its source tree hash and Tailscale's version.
+  string build = 2;
+}
+
+// Starts the node, signing in with the stored identity, with the auth key, or
+// by the link a NEEDS_LOGIN state carries. On a running node it changes
+// nothing and answers ready again: a new port or hostname takes a down first.
+message Up {
+  // The directory that holds the node's state, created mode 0700 by the core.
+  string state_dir = 1;
+  // The device name.
+  string hostname = 2;
+  // A key that signs the node in without a link; the package never stores or
+  // logs it.
+  optional string auth_key = 3;
+  // The control server's URL; empty means Tailscale's.
+  string control_url = 4;
+  // The TCP port the node accepts the core's callers on.
+  uint32 port = 5;
+  // Sets the node's identity aside first, so it signs in as a new device; a
+  // running node stops first. Without it, a state directory whose node record
+  // outlived its state fails rather than sign in afresh.
+  bool new_identity = 6;
+}
+
+// Stops the node; its state stays for the next up.
+message Down {}
+
+// Asks the control server for a new sign-in link, for a node that needs one.
+message Login {}
+
+// Signs the node out at the control server and deletes its state.
+message Logout {}
+
+// Opens a TCP connection to a node of the tailnet.
+message Dial {
+  // Chosen by the core, unique among its dials in flight, with the top bit
+  // set, which a caller's id never has, so the two share the connections
+  // socket; the answer and the descriptor carry it. A dial whose id lacks the
+  // bit fails.
+  uint64 id = 1;
+  // The node's MagicDNS name or tailnet address.
+  string host = 2;
+  // The TCP port.
+  uint32 port = 3;
+}
+
+// The node listens on the port the last up named.
+message Ready {}
+
+// The state of the node.
+enum NodeState {
+  // Not set.
+  NODE_STATE_UNSPECIFIED = 0;
+  // No node runs.
+  NODE_STATE_STOPPED = 1;
+  // The node is starting or reconnecting to the control server.
+  NODE_STATE_STARTING = 2;
+  // The node waits for a sign-in by the login link.
+  NODE_STATE_NEEDS_LOGIN = 3;
+  // The node is on the tailnet.
+  NODE_STATE_RUNNING = 4;
+  // The node stopped on an error it cannot recover from alone.
+  NODE_STATE_FAILED = 5;
+}
+
+// The node's state after a change.
+message State {
+  // The state.
+  NodeState state = 1;
+  // The sign-in link, while the state is NEEDS_LOGIN.
+  string login_url = 2;
+  // The node's MagicDNS name, once the control server has named it.
+  string name = 3;
+  // The node's tailnet addresses, while it runs.
+  repeated string addresses = 4;
+  // Why the state is FAILED, or a health warning in another state.
+  string error = 5;
+}
+
+// Who a connection came from, as WhoIs reports it.
+message Caller {
+  // The connection's id, which its descriptor carries on the connections
+  // socket. It never has the top bit set, which marks a dial's id.
+  uint64 id = 1;
+  // The caller's identity.
+  Peer peer = 2;
+}
+
+// A node of the tailnet and the user who owns it.
+message Peer {
+  // The node's stable id.
+  string stable_id = 1;
+  // The node's MagicDNS name.
+  string node_name = 2;
+  // The owning user's id; for a tagged node, the id Tailscale gives tagged
+  // devices.
+  uint64 user_id = 3;
+  // The owning user's login name.
+  string login_name = 4;
+  // The node's ACL tags; empty for a user-owned node.
+  repeated string tags = 5;
+  // The node is shared in from another tailnet.
+  bool shared = 6;
+  // In a peers-changed event: the node left the tailnet.
+  bool removed = 7;
+}
+
+// A dial connected.
+message Dialed {
+  // The dial's id, which the descriptor carries on the connections socket.
+  uint64 id = 1;
+  // The remote node's tailnet address the connection reached.
+  string address = 2;
+}
+
+// A dial failed.
+message DialFailed {
+  // The dial's id.
+  uint64 id = 1;
+  // Why.
+  string error = 2;
+}
+
+// Peers of the tailnet changed: each one that changed or left.
+message PeersChanged {
+  // The peers, as they are now.
+  repeated Peer peers = 1;
+}
+
+// A signal the package owns.
+enum SignalKind {
+  // Not set.
+  SIGNAL_KIND_UNSPECIFIED = 0;
+  // SIGTERM.
+  SIGNAL_KIND_TERM = 1;
+  // SIGINT.
+  SIGNAL_KIND_INT = 2;
+}
+
+// The process received a signal; the core shuts down as it would on Stop.
+message Signal {
+  // Which signal.
+  SignalKind kind = 1;
+}
+
+// The node record the package keeps as node.pb in the state directory, mode
+// 0600, once the node has run. It says the directory held a signed-in node,
+// so a state that went missing fails the next up rather than sign in afresh;
+// the core never reads it.
+message NodeRecord {
+  // The node's stable id.
+  string stable_id = 1;
+  // The node's MagicDNS name.
+  string name = 2;
+  // The Tailscale version that last ran the node; a state from a newer one is
+  // refused, as tsnet has no downgrade path.
+  string tailscale_version = 3;
+}
