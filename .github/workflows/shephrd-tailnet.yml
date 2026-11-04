@@ -1,0 +1,114 @@
+name: shephrd-tailnet
+
+# Releases shephrd's tailnet package, shephrd/tailnet, for each push to the
+# managed branch: the c-archive for linux-x64 and macos-arm64 with its schema,
+# fixtures and test control server, as release tailnet-<Tailscale>-<commit>.
+# shephrd pins a release by that version and installs it with mise. It is the
+# fork's only workflow; every inherited one stays disabled (AGENTS.md).
+on:
+  push:
+    branches: [downstream]
+
+permissions: {}
+
+concurrency:
+  # One release at a time, and never a cancelled upload.
+  group: shephrd-tailnet
+  cancel-in-progress: false
+
+env:
+  # The fork's forkctl task comes from a git:: include, which mise gates.
+  MISE_EXPERIMENTAL: "1"
+  # mise would write an untracked mise.lock, and a dirty tree fails forkctl's
+  # audit and the build's clean-tree check.
+  MISE_LOCKFILE: "false"
+  # forkctl's hydrate writes StGit's stack metadata as commits.
+  GIT_AUTHOR_NAME: shephrd-tailnet
+  GIT_AUTHOR_EMAIL: shephrd-tailnet@users.noreply.github.com
+  GIT_COMMITTER_NAME: shephrd-tailnet
+  GIT_COMMITTER_EMAIL: shephrd-tailnet@users.noreply.github.com
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      # Creates the draft release the builds upload to.
+      contents: write
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      build: ${{ steps.plan.outputs.build }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # forkctl audits the stack against its upstream base.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+      # A release is never cut from a stack forkctl would not accept.
+      - name: Hydrate the patch stack
+        run: mise run fork init
+      - name: Audit the patch stack
+        run: mise run fork check
+      - name: Check the Go types against the schema
+        run: mise run tailnet:check
+      - name: Plan the release
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # forkctl adds the upstream remote, which gh would pick for a fork.
+          GH_REPO: ${{ github.repository }}
+        run: mise run tailnet:plan
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    name: ${{ matrix.id }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-x64
+            os: ubuntu-24.04
+          - id: macos-arm64
+            os: macos-26
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    permissions:
+      # Uploads the archive and its checksum to the draft release.
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+      - name: Test the package
+        run: mise run tailnet:test
+      - name: Build the archive
+        env:
+          TAILNET_PACK: ${{ runner.temp }}/pack
+        run: mise run tailnet:build
+      - name: Upload the archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAILNET_PACK: ${{ runner.temp }}/pack
+          TAG: ${{ needs.plan.outputs.tag }}
+          TARGET: ${{ matrix.id }}
+        run: mise run tailnet:upload
+
+  publish:
+    needs: [plan, build]
+    if: needs.plan.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      # Publishes the draft, which creates its tag at the pushed commit.
+      contents: write
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false --latest=false
