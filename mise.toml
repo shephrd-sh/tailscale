@@ -1,0 +1,8 @@
+# forkctl manages this fork's patch stack: `mise run fork status`.
+# The included task pins Git, StGit and forkctl itself.
+min_version = "2026.10.1"
+
+[task_config]
+includes = [
+  "git::https://github.com/victor-software-house/forkctl.git//tasks/fork?ref=v0.0.48",
+]
