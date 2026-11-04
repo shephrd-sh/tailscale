@@ -367,3 +367,19 @@ func TestDecodeMsgMaxDecodedSize(t *testing.T) {
 		t.Fatalf("decodeMsg(oversized frame) = %v, want zstd.ErrDecoderSizeExceeded", err)
 	}
 }
+
+func TestHandleDebugMessageExitHook(t *testing.T) {
+	var got []int
+	ExitHook = func(code int) { got = append(got, code) }
+	defer func() { ExitHook = nil }()
+
+	c := &Direct{logf: t.Logf}
+	code := 3
+	err := c.handleDebugMessage(t.Context(), &tailcfg.Debug{Exit: &code})
+	if !errors.Is(err, errExitRequested) {
+		t.Fatalf("handleDebugMessage(Exit: 3) = %v, want errExitRequested", err)
+	}
+	if len(got) != 1 || got[0] != 3 {
+		t.Fatalf("ExitHook calls = %v, want [3]", got)
+	}
+}

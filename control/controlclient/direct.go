@@ -1395,8 +1395,24 @@ func NetmapFromMapResponseForDebug(ctx context.Context, pr persist.PersistView, 
 	return sess.netmap(), nil
 }
 
+// ExitHook, when non-nil, is called instead of os.Exit when a map response
+// carries tailcfg.Debug.Exit. A program that embeds a client and serves more
+// than the tailnet, such as one built on tsnet, sets it to stop the client
+// alone. It runs on the map session's goroutine, so it must not wait for the
+// client to stop. Set it before starting any client.
+var ExitHook func(code int)
+
+// errExitRequested ends the map response that carried tailcfg.Debug.Exit
+// when ExitHook handled it, so none of that response is applied.
+var errExitRequested = errors.New("control plane requested exit")
+
 func (c *Direct) handleDebugMessage(ctx context.Context, debug *tailcfg.Debug) error {
 	if code := debug.Exit; code != nil {
+		if hook := ExitHook; hook != nil {
+			c.logf("stopping with status %v per controlplane", *code)
+			hook(*code)
+			return errExitRequested
+		}
 		c.logf("exiting process with status %v per controlplane", *code)
 		os.Exit(*code)
 	}
