@@ -1,0 +1,96 @@
+# forkctl manages this fork's patch stack: `mise run fork status`.
+# The included task pins Git, StGit and forkctl itself.
+min_version = "2026.10.1"
+
+[task_config]
+includes = [
+  "git::https://github.com/victor-software-house/forkctl.git//tasks/fork?ref=v0.0.48",
+]
+
+# shephrd's tailnet package, shephrd/tailnet: Go as its go.mod names it, and
+# protoc with protoc-gen-go to generate its types from the schema.
+[tools]
+go = "1.27.1"
+protoc = "36.2"
+"github:protocolbuffers/protobuf-go" = { version = "1.36.12", bin = "protoc-gen-go" }
+
+[tasks."tailnet:generate"]
+description = "Regenerate shephrd/tailnet/tailnetpb from the schema in shephrd/tailnet/proto"
+run = "protoc -I shephrd/tailnet/proto --go_out=. --go_opt=module=tailscale.com shephrd/tailnet/v1/tailnet.proto"
+
+[tasks."tailnet:check"]
+description = "Fail when the committed Go types differ from what the schema generates"
+depends = ["tailnet:generate"]
+run = "git diff --exit-code -- shephrd/tailnet/tailnetpb"
+
+[tasks."tailnet:fixtures"]
+description = "Rewrite shephrd/tailnet/fixtures/v1 from the values in fixtures_test.go"
+env = { CGO_ENABLED = "1", SHEPHRD_WRITE_FIXTURES = "1" }
+run = "go test -tags ts_omit_logtail -run TestFixtures ./shephrd/tailnet"
+
+[tasks."tailnet:test"]
+description = "Vet the tailnet package and run its tests, the fixture tests among them"
+env = { CGO_ENABLED = "1" }
+run = [
+  "go vet -tags ts_omit_logtail ./shephrd/...",
+  "go test -tags ts_omit_logtail ./shephrd/...",
+]
+
+# The release workflow's tasks. A release is tailnet-<Tailscale>-<commit>:
+# planning creates it as a draft, each build uploads to it, and the last job
+# publishes it. A draft left by a failed run is built again; a published one
+# is never touched.
+[tasks."tailnet:plan"]
+description = "Create the draft release for the pushed commit, $GITHUB_SHA, and write tag= and build= to $GITHUB_OUTPUT"
+run = '''
+set -eu
+tag="tailnet-$(cat VERSION.txt)-$(git rev-parse --short=12 "$GITHUB_SHA")"
+draft="$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null || echo missing)"
+case "$draft" in
+  missing)
+    gh release create "$tag" --draft --target "$GITHUB_SHA" --title "$tag" --notes-file shephrd/tailnet/README.md
+    build=true ;;
+  true) build=true ;;
+  *) build=false ;;
+esac
+echo "tag=$tag" >> "$GITHUB_OUTPUT"
+echo "build=$build" >> "$GITHUB_OUTPUT"
+'''
+
+[tasks."tailnet:upload"]
+description = "Pack $TAILNET_PACK as the $TARGET archive with its checksum and upload both to release $TAG"
+run = '''
+set -eu
+archive="$RUNNER_TEMP/libshephrdtailnet-${TAG#tailnet-}-$TARGET.tar.gz"
+tar czf "$archive" -C "$TAILNET_PACK" lib include bin proto fixtures COMMIT LICENSE
+(cd "$(dirname "$archive")" && shasum -a 256 "$(basename "$archive")" > "$(basename "$archive").sha256")
+gh release upload "$TAG" "$archive" "$archive.sha256" --clobber
+'''
+
+# The release workflow packs this directory; COMMIT names the committed
+# tree, so a tree with changes would ship a stamp that does not match what
+# was built.
+# The release's macOS archive is cross-built on an Intel runner, so the job
+# checks what it built: arm64 code, compiled for macOS 26.0.
+[tasks."tailnet:check-macos"]
+description = "Fail unless $TAILNET_PACK holds an arm64 archive and test control server, the archive's C objects built for macOS 26.0"
+run = [
+  'test "$(lipo -archs "$TAILNET_PACK/lib/libshephrdtailnet.a")" = arm64',
+  'test "$(lipo -archs "$TAILNET_PACK/bin/testcontrol")" = arm64',
+  'otool -l "$TAILNET_PACK/lib/libshephrdtailnet.a" | grep -A4 LC_BUILD_VERSION | grep -q "minos 26.0"',
+]
+
+[tasks."tailnet:build"]
+description = "Build libshephrdtailnet.a, its header, Tailscale's test control server, the schema, the fixtures, COMMIT and LICENSE into $TAILNET_PACK"
+env = { CGO_ENABLED = "1", GOFLAGS = "-mod=readonly -trimpath", MACOSX_DEPLOYMENT_TARGET = "26.0" }
+run = [
+  'test -n "${TAILNET_PACK:-}"',
+  'test -z "$(git status --porcelain --untracked-files=all)"',
+  'rm -rf "$TAILNET_PACK"',
+  'mkdir -p "$TAILNET_PACK/include" "$TAILNET_PACK/bin"',
+  'git rev-parse HEAD > "$TAILNET_PACK/COMMIT"',
+  'go build -tags ts_omit_logtail -buildmode=c-archive -ldflags "-X main.commit=$(git rev-parse HEAD)" -o "$TAILNET_PACK/lib/libshephrdtailnet.a" ./shephrd/tailnet',
+  'mv "$TAILNET_PACK/lib/libshephrdtailnet.h" "$TAILNET_PACK/include/"',
+  'go build -o "$TAILNET_PACK/bin/testcontrol" ./shephrd/testcontrol',
+  'cp -R shephrd/tailnet/proto shephrd/tailnet/fixtures LICENSE "$TAILNET_PACK/"',
+]
