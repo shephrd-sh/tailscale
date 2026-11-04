@@ -1,0 +1,32 @@
+logs-dir
+
+From: Victor Araújo <victor@victor-software-house.com>
+
+Downstream-Reason: Keep LocalBackend from creating a logs directory in a build without logtail: logpolicy.LogsDir, called only for the socket-statistics logger, makes ~/.local/share/tailscale for a non-root user even under ts_omit_logtail, where that logger is never made, so shephrd would write outside its instance directory.
+Upstream-Status: not-submitted
+Drop-When: Upstream calls logpolicy.LogsDir only when the socket-statistics logger is compiled in, or stops LogsDir creating directories under ts_omit_logtail.
+---
+ ipn/ipnlocal/local.go |   10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/ipn/ipnlocal/local.go b/ipn/ipnlocal/local.go
+index d869979655142d6b2f85c397fff259ce031465f5..772e72cc7c3d348e11f5f4e79f53590e3579bcbe 100644
+--- a/ipn/ipnlocal/local.go
++++ b/ipn/ipnlocal/local.go
+@@ -653,9 +653,13 @@ func NewLocalBackend(logf logger.Logf, logID logid.PublicID, sys *tsd.System, lo
+ 	}()
+ 
+ 	netMon := sys.NetMon.Get()
+-	b.sockstatLogger, err = sockstatlog.NewLogger(logpolicy.LogsDir(logf), logf, logID, netMon, sys.HealthTracker.Get(), sys.Bus.Get())
+-	if err != nil {
+-		logf("error setting up sockstat logger: %v", err)
++	// Without logtail there is no sockstat logger, and logpolicy.LogsDir would
++	// still create a directory on disk for it.
++	if buildfeatures.HasLogTail {
++		b.sockstatLogger, err = sockstatlog.NewLogger(logpolicy.LogsDir(logf), logf, logID, netMon, sys.HealthTracker.Get(), sys.Bus.Get())
++		if err != nil {
++			logf("error setting up sockstat logger: %v", err)
++		}
+ 	}
+ 	// Enable sockstats logs only on non-mobile unstable builds
+ 	if version.IsUnstableBuild() && !version.IsMobile() && b.sockstatLogger != nil {
