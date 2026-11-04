@@ -1,0 +1,4193 @@
+shephrd-tailnet
+
+From: Victor Ara√∫jo <victor@victor-software-house.com>
+
+Downstream-Reason: shephrd's tailnet package, built as the c-archive shephrdd links: it runs the process's one tsnet node, owns SIGTERM and SIGINT, and serves the tailnet schema in shephrd/tailnet/proto over two socketpairs. It lives here so it builds against exactly the patched Tailscale beside it, and its releases carry the schema and fixtures with the archive.
+Upstream-Status: not-submitted
+Drop-When: shephrd stops embedding tsnet.
+---
+ go.mod                                             |    2 
+ shephrd/tailnet/README.md                          |   51 +
+ shephrd/tailnet/conns.go                           |   62 +
+ shephrd/tailnet/core.go                            |  168 ++
+ shephrd/tailnet/core_test.go                       |  141 ++
+ shephrd/tailnet/fixtures/v1/command_dial.binpb     |    1 
+ shephrd/tailnet/fixtures/v1/command_login.binpb    |  Bin
+ .../tailnet/fixtures/v1/command_read_stats.binpb   |  Bin
+ shephrd/tailnet/fixtures/v1/command_taken.binpb    |    1 
+ shephrd/tailnet/fixtures/v1/command_up.binpb       |    3 
+ .../fixtures/v1/command_up_new_identity.binpb      |    3 
+ shephrd/tailnet/fixtures/v1/event_caller.binpb     |    2 
+ .../tailnet/fixtures/v1/event_dial_failed.binpb    |    1 
+ shephrd/tailnet/fixtures/v1/event_dialed.binpb     |    2 
+ shephrd/tailnet/fixtures/v1/event_hello.binpb      |    2 
+ .../tailnet/fixtures/v1/event_peers_changed.binpb  |    5 
+ shephrd/tailnet/fixtures/v1/event_ready.binpb      |  Bin
+ shephrd/tailnet/fixtures/v1/event_signal.binpb     |    1 
+ .../fixtures/v1/event_state_needs_login.binpb      |    1 
+ shephrd/tailnet/fixtures/v1/event_stats.binpb      |    1 
+ shephrd/tailnet/fixtures/v1/node_record.binpb      |    2 
+ shephrd/tailnet/fixtures_test.go                   |  145 ++
+ shephrd/tailnet/health.go                          |   26 
+ shephrd/tailnet/health_test.go                     |   24 
+ shephrd/tailnet/identity.go                        |   96 +
+ shephrd/tailnet/identity_test.go                   |   97 +
+ shephrd/tailnet/node.go                            |  545 ++++++
+ shephrd/tailnet/node_test.go                       |   35 
+ .../tailnet/proto/shephrd/tailnet/v1/tailnet.proto |  244 +++
+ shephrd/tailnet/serve_test.go                      |   76 +
+ shephrd/tailnet/sock_darwin.go                     |   17 
+ shephrd/tailnet/sock_linux.go                      |    8 
+ shephrd/tailnet/tailnet.go                         |   71 +
+ shephrd/tailnet/tailnetpb/tailnet.pb.go            | 1758 ++++++++++++++++++++
+ shephrd/testcontrol/main.go                        |  219 ++
+ shephrd/testcontrol/main_test.go                   |   56 +
+ 36 files changed, 3865 insertions(+), 1 deletion(-)
+ create mode 100644 shephrd/tailnet/README.md
+ create mode 100644 shephrd/tailnet/conns.go
+ create mode 100644 shephrd/tailnet/core.go
+ create mode 100644 shephrd/tailnet/core_test.go
+ create mode 100644 shephrd/tailnet/fixtures/v1/command_dial.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/command_login.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/command_read_stats.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/command_taken.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/command_up.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/command_up_new_identity.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/event_caller.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/event_dial_failed.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/event_dialed.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/event_hello.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/event_peers_changed.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/event_ready.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/event_signal.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/event_state_needs_login.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/event_stats.binpb
+ create mode 100644 shephrd/tailnet/fixtures/v1/node_record.binpb
+ create mode 100644 shephrd/tailnet/fixtures_test.go
+ create mode 100644 shephrd/tailnet/health.go
+ create mode 100644 shephrd/tailnet/health_test.go
+ create mode 100644 shephrd/tailnet/identity.go
+ create mode 100644 shephrd/tailnet/identity_test.go
+ create mode 100644 shephrd/tailnet/node.go
+ create mode 100644 shephrd/tailnet/node_test.go
+ create mode 100644 shephrd/tailnet/proto/shephrd/tailnet/v1/tailnet.proto
+ create mode 100644 shephrd/tailnet/serve_test.go
+ create mode 100644 shephrd/tailnet/sock_darwin.go
+ create mode 100644 shephrd/tailnet/sock_linux.go
+ create mode 100644 shephrd/tailnet/tailnet.go
+ create mode 100644 shephrd/tailnet/tailnetpb/tailnet.pb.go
+ create mode 100644 shephrd/testcontrol/main.go
+ create mode 100644 shephrd/testcontrol/main_test.go
+
+diff --git a/go.mod b/go.mod
+index b91e97067edf1b3d54e02c217ad2111a6ffbce9d..9bae2d7beb8093020a71bc4494d924eaa44f3f8e 100644
+--- a/go.mod
++++ b/go.mod
+@@ -531,7 +531,7 @@ require (
+ 	golang.org/x/exp/typeparams v0.0.0-20260811152304-ee035b5b010f // indirect
+ 	golang.org/x/telemetry v0.0.0-20260908163034-4bcc4b2ee518 // indirect
+ 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
+-	google.golang.org/protobuf v1.36.12 // indirect
++	google.golang.org/protobuf v1.36.12
+ 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
+ 	gopkg.in/inf.v0 v0.9.1 // indirect
+ 	gopkg.in/warnings.v0 v0.1.2 // indirect
+diff --git a/shephrd/tailnet/README.md b/shephrd/tailnet/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..41ab645b81072c4992d0f578f19c64a28236c319
+--- /dev/null
++++ b/shephrd/tailnet/README.md
+@@ -0,0 +1,51 @@
++# libshephrdtailnet
++
++[shephrd](https://github.com/shephrd-sh)'s tailnet package, built with Go's `-buildmode=c-archive` into `libshephrdtailnet.a`, which the shephrd core daemon links.
++It runs the process's one tsnet node from the Tailscale tree beside it, with this fork's patches, and owns `SIGTERM` and `SIGINT`.
++It lives in the fork so it builds against exactly that tree, and a Tailscale upgrade rebases it with the rest of the stack.
++
++## The C interface
++
++Two functions, whose version is `abi` in `tailnet.go`:
++
++1. `shephrd_tailnet_abi()` returns the C interface's version, which the core checks before it calls anything else.
++2. `shephrd_tailnet_start(control, conns)` takes one end of a stream socketpair, which carries framed commands and events, and one end of a second stream socketpair, which carries each connection's 8-byte id with its descriptor attached to the id's first byte: a dial's id has the top bit set, and a caller's never does. A stream, unlike a datagram socket, makes the package wait while the core is behind, so no handover is lost; macOS drops a datagram sent to a full queue. The package keeps its own copy of each descriptor open until a `Taken` command names the id, since on macOS a socket in flight can break when its sender closes the last other copy before the receiver reads it.
++
++`abi` rises with every change to an exported function's name, signature or meaning.
++
++## The state directory
++
++`Up` names the node's state directory, which the core creates.
++tsnet keeps the node's identity there in `tailscaled.state`, and once the node has run, the package keeps `node.pb` beside it, mode `0600`: a `NodeRecord` with the node's stable id, name and the Tailscale version that ran it.
++Before tsnet reads the state, the package refuses to start, with a `FAILED` state, when the record outlived its state (missing or empty, which tsnet would replace with a new identity) or names a newer Tailscale than this build's, since tsnet has no downgrade path.
++`Up` with `new_identity` first moves the package's files, `tailscaled*`, `certs` and `node.pb`, into a `replaced-<time>` directory beside them; the core's own files stay.
++
++## The schema
++
++[`proto/shephrd/tailnet/v1/tailnet.proto`](proto/shephrd/tailnet/v1/tailnet.proto) defines the messages on the control socket: each frame is a 4-byte little-endian body length, then one `Command` from the core or one `Event` from the package.
++`tailnetpb/` holds the Go types generated from it, and `fixtures/v1/` one encoded message per file, which the Go tests and shephrd's binding both check.
++
++Rules for changing the schema:
++
++1. Change `v1` only by adding messages, arms and fields; anything else is a new version directory.
++2. Declare fields in field-number order, and use no `map` fields.
++3. Give every enum a zero value named `<ENUM>_UNSPECIFIED`.
++4. Mark a removed field or arm `reserved`, by number and name, and never reuse a number.
++5. Comment every message, field, arm and enum value.
++6. Add a fixture, with its value in `fixtures_test.go`, for each new message.
++7. Regenerate with `mise run tailnet:generate` and `mise run tailnet:fixtures`; `mise run tailnet:check` fails when the committed types differ from the schema.
++
++## Releases
++
++`.github/workflows/shephrd-tailnet.yml` releases each push to `downstream` that passes `mise run fork check`, the package's tests and the schema check.
++The release is `tailnet-<Tailscale version>-<commit>`, the first 12 characters of the `downstream` commit, so a push that changes nothing releases nothing new.
++
++Each `libshephrdtailnet-<version>-<target>.tar.gz`, for `linux-x64` and `macos-arm64`, holds:
++
++- `lib/libshephrdtailnet.a` and `include/libshephrdtailnet.h`, built with Go from `mise.toml`, `CGO_ENABLED=1`, `-trimpath` and `-tags ts_omit_logtail`, so the archive holds no log uploader; macOS builds for macOS 26.0.
++- `bin/testcontrol`, `shephrd/testcontrol` from the same commit: Tailscale's test control server with its DERP and STUN servers, for the core's tests, with flags for a required sign-in and an auth key, and an admin API on loopback only that completes a sign-in, tags a node, expires keys and sends `Debug.Exit`. It is test-only and never ships in an app.
++- `proto/` and `fixtures/`, the schema and fixtures above.
++- `COMMIT`, the full commit the archive was built from, which shephrd's binding checks against the version it pins.
++- `LICENSE`, Tailscale's BSD-3-Clause license.
++
++Each archive has a `.sha256` beside it.
+diff --git a/shephrd/tailnet/conns.go b/shephrd/tailnet/conns.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..e835b911f3ef0e99f77376e4fdaad8848324c349
+--- /dev/null
++++ b/shephrd/tailnet/conns.go
+@@ -0,0 +1,62 @@
++package main
++
++import (
++	"fmt"
++	"io"
++	"net"
++	"os"
++	"sync"
++	"sync/atomic"
++	"syscall"
++)
++
++// pumping counts the connections pump carries, for the stats event.
++var pumping atomic.Int64
++
++// pump returns the core's end of a close-on-exec socketpair whose other end
++// carries conn, and closes both when either direction ends. The package's end
++// lives only in the goroutines that copy it, so nothing keys a connection by
++// its descriptor number (design, decision 2).
++func pump(conn net.Conn) (int, error) {
++	fds, err := socketpair()
++	if err != nil {
++		return -1, err
++	}
++	// Non-blocking, so os.NewFile puts the copies on Go's poller instead of a
++	// thread blocked in read(2) per connection. The core's end stays
++	// blocking; the binding sets its own mode.
++	if err := syscall.SetNonblock(fds[1], true); err != nil {
++		syscall.Close(fds[0])
++		syscall.Close(fds[1])
++		return -1, err
++	}
++	ours := os.NewFile(uintptr(fds[1]), "tailnet-conn")
++	pumping.Add(1)
++	var both sync.WaitGroup
++	both.Add(2)
++	go func() {
++		defer both.Done()
++		if _, err := io.Copy(ours, conn); err != nil {
++			fmt.Fprintf(os.Stderr, "tailnet: connection from %v ended: %v\n", conn.RemoteAddr(), err)
++		}
++		// The peer finished sending: tell the core, which still reads.
++		syscall.Shutdown(fds[1], syscall.SHUT_WR)
++	}()
++	go func() {
++		defer both.Done()
++		if _, err := io.Copy(conn, ours); err != nil {
++			fmt.Fprintf(os.Stderr, "tailnet: connection to %v ended: %v\n", conn.RemoteAddr(), err)
++		}
++		// The core never half-closes a connection it still reads, so its end
++		// finishing ends the connection: closing conn also stops the copy
++		// above, even when the peer is idle.
++		conn.Close()
++	}()
++	go func() {
++		both.Wait()
++		ours.Close()
++		conn.Close()
++		pumping.Add(-1)
++	}()
++	return fds[0], nil
++}
+diff --git a/shephrd/tailnet/core.go b/shephrd/tailnet/core.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..158e64a8bcd77512a71311e7b3ca0a90714ca77c
+--- /dev/null
++++ b/shephrd/tailnet/core.go
+@@ -0,0 +1,168 @@
++package main
++
++import (
++	"encoding/binary"
++	"fmt"
++	"io"
++	"net"
++	"os"
++	"os/signal"
++	"sync"
++	"syscall"
++
++	"google.golang.org/protobuf/proto"
++	"tailscale.com/version"
++
++	pb "tailscale.com/shephrd/tailnet/tailnetpb"
++)
++
++// maxFrame bounds a command's body; the largest, an up, is a few hundred
++// bytes.
++const maxFrame = 64 << 10
++
++// core is the package's side of the two sockets.
++type core struct {
++	control net.Conn
++	conns   *net.UnixConn
++
++	// mu orders whole frames on the control socket.
++	mu sync.Mutex
++	// fdMu keeps each id whole on the connections stream.
++	fdMu sync.Mutex
++	// held keeps the package's copy of each handed descriptor, by
++	// connection id, until the core takes it.
++	heldMu sync.Mutex
++	held   map[uint64]int
++}
++
++func newCore(control net.Conn, conns *net.UnixConn) *core {
++	return &core{control: control, conns: conns, held: map[uint64]int{}}
++}
++
++// send writes one event as a frame: a 4-byte little-endian length, then the
++// body. A write error means the core is gone, and the read loop ends too.
++func (c *core) send(event *pb.Event) {
++	body, err := proto.Marshal(event)
++	if err != nil {
++		fmt.Fprintf(os.Stderr, "tailnet: encode event: %v\n", err)
++		return
++	}
++	frame := binary.LittleEndian.AppendUint32(make([]byte, 0, 4+len(body)), uint32(len(body)))
++	frame = append(frame, body...)
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if _, err := c.control.Write(frame); err != nil {
++		c.control.Close()
++	}
++}
++
++// sendFd hands the core a connection's descriptor on the connections stream,
++// as its 8-byte id with the descriptor attached to the id's first byte. A
++// full stream waits for the core to read, so a burst of connections is never
++// dropped, as a datagram socket drops them on macOS; an error means the core
++// is gone, and the descriptor is closed.
++//
++// The package's copy stays open until the core's taken command names the id:
++// on macOS a socket in flight can break when its sender closes the last other
++// copy before the receiver reads it. It is held before the write, since the
++// core can take the id before the write returns.
++func (c *core) sendFd(id uint64, fd int) error {
++	c.heldMu.Lock()
++	c.held[id] = fd
++	c.heldMu.Unlock()
++	if err := c.writeFd(id, fd); err != nil {
++		c.taken(id)
++		return err
++	}
++	return nil
++}
++
++func (c *core) writeFd(id uint64, fd int) error {
++	body := binary.LittleEndian.AppendUint64(nil, id)
++	c.fdMu.Lock()
++	defer c.fdMu.Unlock()
++	n, _, err := c.conns.WriteMsgUnix(body, syscall.UnixRights(fd), nil)
++	if err != nil {
++		return err
++	}
++	// The descriptor went with the first byte; the rest of the id follows.
++	_, err = c.conns.Write(body[n:])
++	return err
++}
++
++// taken closes the package's copy of connection id's descriptor; an id the
++// package does not hold changes nothing.
++func (c *core) taken(id uint64) {
++	c.heldMu.Lock()
++	fd, ok := c.held[id]
++	delete(c.held, id)
++	c.heldMu.Unlock()
++	if ok {
++		syscall.Close(fd)
++	}
++}
++
++// read returns the next command, or io.EOF when the core closed the socket.
++func (c *core) read() (*pb.Command, error) {
++	var header [4]byte
++	if _, err := io.ReadFull(c.control, header[:]); err != nil {
++		return nil, err
++	}
++	n := binary.LittleEndian.Uint32(header[:])
++	if n > maxFrame {
++		return nil, fmt.Errorf("a command of %d bytes exceeds %d", n, maxFrame)
++	}
++	body := make([]byte, n)
++	if _, err := io.ReadFull(c.control, body); err != nil {
++		return nil, err
++	}
++	command := new(pb.Command)
++	if err := proto.Unmarshal(body, command); err != nil {
++		return nil, err
++	}
++	return command, nil
++}
++
++// serve owns SIGTERM and SIGINT, sends the hello, and carries out commands
++// until the control socket closes; then it stops the node.
++func serve(c *core) {
++	// The handlers are installed before the hello: the core starts the
++	// package before it says it is ready, so a stop signal sent right after
++	// that line is caught. Forwarding starts after the hello, which stays the
++	// first event; a signal in between waits in the channel.
++	signals := make(chan os.Signal, 1)
++	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
++	defer signal.Stop(signals)
++	c.send(&pb.Event{Body: &pb.Event_Hello{Hello: &pb.Hello{
++		Abi:   abi,
++		Build: fmt.Sprintf("tailnet %s tailscale %s", commit, version.Short()),
++	}}})
++	go forwardSignals(c, signals)
++	// The node's own goroutine carries the commands out, so a command that
++	// waits never holds up reading the next.
++	commands := make(chan *pb.Command)
++	go func() {
++		defer close(commands)
++		for {
++			command, err := c.read()
++			if err != nil {
++				if err != io.EOF {
++					fmt.Fprintf(os.Stderr, "tailnet: control socket: %v\n", err)
++				}
++				return
++			}
++			commands <- command
++		}
++	}()
++	newNode(c).run(commands)
++}
++
++func forwardSignals(c *core, signals <-chan os.Signal) {
++	for s := range signals {
++		kind := pb.SignalKind_SIGNAL_KIND_TERM
++		if s == syscall.SIGINT {
++			kind = pb.SignalKind_SIGNAL_KIND_INT
++		}
++		c.send(&pb.Event{Body: &pb.Event_Signal{Signal: &pb.Signal{Kind: kind}}})
++	}
++}
+diff --git a/shephrd/tailnet/core_test.go b/shephrd/tailnet/core_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..e963cee8ed8b574a0f8a44fe7637f26e3ff50ea0
+--- /dev/null
++++ b/shephrd/tailnet/core_test.go
+@@ -0,0 +1,141 @@
++package main
++
++import (
++	"encoding/binary"
++	"errors"
++	"io"
++	"net"
++	"os"
++	"syscall"
++	"testing"
++	"time"
++)
++
++// TestABurstOfHandoversWaitsForTheCore hands over more connections than the
++// connections stream holds while the core does not read: every one arrives
++// whole and in order once it reads. A datagram socket on macOS drops them
++// when its 4 KiB queue fills.
++func TestABurstOfHandoversWaitsForTheCore(t *testing.T) {
++	coreEnd, ours := pair(t, syscall.SOCK_STREAM)
++	c := newCore(nil, ours.(*net.UnixConn))
++	const burst = 200
++	sent := make(chan error, 1)
++	go func() {
++		for id := uint64(1); id <= burst; id++ {
++			fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
++			if err != nil {
++				sent <- err
++				return
++			}
++			syscall.Close(fds[1])
++			if err := c.sendFd(id, fds[0]); err != nil {
++				sent <- err
++				return
++			}
++		}
++		sent <- nil
++	}()
++	// The reader holds back long enough for the stream to fill.
++	time.Sleep(500 * time.Millisecond)
++
++	reader := coreEnd.(*net.UnixConn)
++	reader.SetReadDeadline(time.Now().Add(10 * time.Second))
++	var record [8]byte
++	filled, ids, fds := 0, uint64(0), 0
++	oob := make([]byte, syscall.CmsgSpace(4*4))
++	for ids < burst {
++		n, oobn, _, _, err := reader.ReadMsgUnix(record[filled:], oob)
++		if err != nil {
++			t.Fatalf("after %d ids: %v", ids, err)
++		}
++		messages, err := syscall.ParseSocketControlMessage(oob[:oobn])
++		if err != nil {
++			t.Fatal(err)
++		}
++		for _, message := range messages {
++			rights, err := syscall.ParseUnixRights(&message)
++			if err != nil {
++				t.Fatal(err)
++			}
++			for _, fd := range rights {
++				syscall.Close(fd)
++			}
++			fds += len(rights)
++		}
++		filled += n
++		if filled < len(record) {
++			continue
++		}
++		filled = 0
++		ids++
++		if got := binary.LittleEndian.Uint64(record[:]); got != ids {
++			t.Fatalf("id %d arrived as id %d", ids, got)
++		}
++	}
++	if fds != burst {
++		t.Fatalf("%d descriptors arrived with %d ids", fds, burst)
++	}
++	if err := <-sent; err != nil {
++		t.Fatal(err)
++	}
++	if len(c.held) != burst {
++		t.Fatalf("the package holds %d descriptors, not %d", len(c.held), burst)
++	}
++	for id := uint64(1); id <= burst; id++ {
++		c.taken(id)
++	}
++	if len(c.held) != 0 {
++		t.Fatalf("the package still holds %d descriptors once all are taken", len(c.held))
++	}
++}
++
++// TestAHandedDescriptorStaysOpenUntilTaken closes the core's copy at once: the
++// connection stays open through the package's copy until the core takes it.
++func TestAHandedDescriptorStaysOpenUntilTaken(t *testing.T) {
++	coreEnd, ours := pair(t, syscall.SOCK_STREAM)
++	c := newCore(nil, ours.(*net.UnixConn))
++	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	peerFile := os.NewFile(uintptr(fds[1]), "peer")
++	peer, err := net.FileConn(peerFile)
++	peerFile.Close()
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer peer.Close()
++	if err := c.sendFd(5, fds[0]); err != nil {
++		t.Fatal(err)
++	}
++	reader := coreEnd.(*net.UnixConn)
++	reader.SetReadDeadline(time.Now().Add(10 * time.Second))
++	var record [8]byte
++	oob := make([]byte, syscall.CmsgSpace(4))
++	if _, oobn, _, _, err := reader.ReadMsgUnix(record[:], oob); err != nil {
++		t.Fatal(err)
++	} else {
++		messages, err := syscall.ParseSocketControlMessage(oob[:oobn])
++		if err != nil || len(messages) != 1 {
++			t.Fatalf("%d control messages: %v", len(messages), err)
++		}
++		rights, err := syscall.ParseUnixRights(&messages[0])
++		if err != nil {
++			t.Fatal(err)
++		}
++		for _, fd := range rights {
++			syscall.Close(fd)
++		}
++	}
++
++	var one [1]byte
++	peer.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
++	if _, err := peer.Read(one[:]); !errors.Is(err, os.ErrDeadlineExceeded) {
++		t.Fatalf("the connection ended before the core took it: %v", err)
++	}
++	c.taken(5)
++	peer.SetReadDeadline(time.Now().Add(10 * time.Second))
++	if _, err := peer.Read(one[:]); err != io.EOF {
++		t.Fatalf("the connection stayed open once taken: %v", err)
++	}
++}
+diff --git a/shephrd/tailnet/fixtures/v1/command_dial.binpb b/shephrd/tailnet/fixtures/v1/command_dial.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..df961d32317f6dc25aabab024d80c1934fa47703
+--- /dev/null
++++ b/shephrd/tailnet/fixtures/v1/command_dial.binpb
+@@ -0,0 +1 @@
++*#âÄÄÄÄÄÄÄÄworkstation-shephrdì:
+\ No newline at end of file
+diff --git a/shephrd/tailnet/fixtures/v1/command_login.binpb b/shephrd/tailnet/fixtures/v1/command_login.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..d0e81b8334e5883419c554711d6ee90c1df67b79
+GIT binary patch
+literal 2
+Jcmb1Q0000s02=@R
+
+literal 0
+HcmV?d00001
+
+diff --git a/shephrd/tailnet/fixtures/v1/command_read_stats.binpb b/shephrd/tailnet/fixtures/v1/command_read_stats.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..5ed660daf0071bcc44cd86e728592110e8f7d69e
+GIT binary patch
+literal 2
+JcmXqF0001H05bpp
+
+literal 0
+HcmV?d00001
+
+diff --git a/shephrd/tailnet/fixtures/v1/command_taken.binpb b/shephrd/tailnet/fixtures/v1/command_taken.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..83c3f7d89c7ac2d3356b7cb88887052c526d43b1
+--- /dev/null
++++ b/shephrd/tailnet/fixtures/v1/command_taken.binpb
+@@ -0,0 +1 @@
++:âÄÄÄÄÄÄÄÄ
+\ No newline at end of file
+diff --git a/shephrd/tailnet/fixtures/v1/command_up.binpb b/shephrd/tailnet/fixtures/v1/command_up.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..82ecd32ade776ee83ef0325933153248a85219ce
+--- /dev/null
++++ b/shephrd/tailnet/fixtures/v1/command_up.binpb
+@@ -0,0 +1,3 @@
++
++\
++0/home/owner/.local/state/shephrd/default/tailnetworkstation-shephrdfixture-auth-key(ì:
+\ No newline at end of file
+diff --git a/shephrd/tailnet/fixtures/v1/command_up_new_identity.binpb b/shephrd/tailnet/fixtures/v1/command_up_new_identity.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..31c54b015c7f92464d1872dd83c0787b2a02e2df
+--- /dev/null
++++ b/shephrd/tailnet/fixtures/v1/command_up_new_identity.binpb
+@@ -0,0 +1,3 @@
++
++L
++0/home/owner/.local/state/shephrd/default/tailnetworkstation-shephrd(ì:0
+\ No newline at end of file
+diff --git a/shephrd/tailnet/fixtures/v1/event_caller.binpb b/shephrd/tailnet/fixtures/v1/event_caller.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..f43972c03d4a2be009f027827364905a4a8d3a26
+--- /dev/null
++++ b/shephrd/tailnet/fixtures/v1/event_caller.binpb
+@@ -0,0 +1,2 @@
++"SO
++nFixture1CNTRL!macbook-portable.tail0123.ts.net.ı‰Ü»Ëáº"owner@example.com
+\ No newline at end of file
+diff --git a/shephrd/tailnet/fixtures/v1/event_dial_failed.binpb b/shephrd/tailnet/fixtures/v1/event_dial_failed.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..debb4d1993069d1cc2ab35f798f52e018bc34c68
+--- /dev/null
++++ b/shephrd/tailnet/fixtures/v1/event_dial_failed.binpb
+@@ -0,0 +1 @@
++29âÄÄÄÄÄÄÄÄ,dial tcp 100.64.0.2:7443: connection refused
+\ No newline at end of file
+diff --git a/shephrd/tailnet/fixtures/v1/event_dialed.binpb b/shephrd/tailnet/fixtures/v1/event_dialed.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..b6cf210c5fd3b4807b0b2c3c0e1161b7712ab460
+--- /dev/null
++++ b/shephrd/tailnet/fixtures/v1/event_dialed.binpb
+@@ -0,0 +1,2 @@
++*âÄÄÄÄÄÄÄÄ
++100.64.0.2
+\ No newline at end of file
+diff --git a/shephrd/tailnet/fixtures/v1/event_hello.binpb b/shephrd/tailnet/fixtures/v1/event_hello.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..2f787d9ce1f6b041096fed01fa44b78749b80da0
+--- /dev/null
++++ b/shephrd/tailnet/fixtures/v1/event_hello.binpb
+@@ -0,0 +1,2 @@
++
++*&tailnet bcf6dd4cd0b4 tailscale 1.104.1
+\ No newline at end of file
+diff --git a/shephrd/tailnet/fixtures/v1/event_peers_changed.binpb b/shephrd/tailnet/fixtures/v1/event_peers_changed.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..48c3047bc972cad9f770bd2908337c21c9bbde9e
+--- /dev/null
++++ b/shephrd/tailnet/fixtures/v1/event_peers_changed.binpb
+@@ -0,0 +1,5 @@
++:õ
++F
++nFixture2CNTRLci-runner.tail0123.ts.net."tagged-devices*tag:ci
++Q
++nFixture1CNTRL!macbook-portable.tail0123.ts.net.ı‰Ü»Ëáº"owner@example.com8
+\ No newline at end of file
+diff --git a/shephrd/tailnet/fixtures/v1/event_ready.binpb b/shephrd/tailnet/fixtures/v1/event_ready.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..5adb0e008426210fd26884a924dffa51218d41a3
+GIT binary patch
+literal 2
+JcmWe)0000c022TJ
+
+literal 0
+HcmV?d00001
+
+diff --git a/shephrd/tailnet/fixtures/v1/event_signal.binpb b/shephrd/tailnet/fixtures/v1/event_signal.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..863dbcaa06e56ee81dea36258a8676b1b2f7369d
+--- /dev/null
++++ b/shephrd/tailnet/fixtures/v1/event_signal.binpb
+@@ -0,0 +1 @@
++B
+\ No newline at end of file
+diff --git a/shephrd/tailnet/fixtures/v1/event_state_needs_login.binpb b/shephrd/tailnet/fixtures/v1/event_state_needs_login.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..81c63ffee4d3369b720f7dd362946efae90c93a5
+--- /dev/null
++++ b/shephrd/tailnet/fixtures/v1/event_state_needs_login.binpb
+@@ -0,0 +1 @@
++0,https://login.tailscale.com/a/0123456789abcd
+\ No newline at end of file
+diff --git a/shephrd/tailnet/fixtures/v1/event_stats.binpb b/shephrd/tailnet/fixtures/v1/event_stats.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..831e7d57120268d802f22d77346689548945e063
+--- /dev/null
++++ b/shephrd/tailnet/fixtures/v1/event_stats.binpb
+@@ -0,0 +1 @@
++J)
+\ No newline at end of file
+diff --git a/shephrd/tailnet/fixtures/v1/node_record.binpb b/shephrd/tailnet/fixtures/v1/node_record.binpb
+new file mode 100644
+index 0000000000000000000000000000000000000000..6ac6bab2653957a88fed400e02d081f75434608e
+--- /dev/null
++++ b/shephrd/tailnet/fixtures/v1/node_record.binpb
+@@ -0,0 +1,2 @@
++
++nFixture1CNTRL#workstation-shephrd.example.ts.net.1.104.1
+\ No newline at end of file
+diff --git a/shephrd/tailnet/fixtures_test.go b/shephrd/tailnet/fixtures_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..9bb04a596c61bb7e67d8bc42514d04c97a67ded3
+--- /dev/null
++++ b/shephrd/tailnet/fixtures_test.go
+@@ -0,0 +1,145 @@
++package main
++
++import (
++	"bytes"
++	"os"
++	"path/filepath"
++	"testing"
++
++	"google.golang.org/protobuf/proto"
++
++	pb "tailscale.com/shephrd/tailnet/tailnetpb"
++)
++
++// userPeer is the peer the caller and peers-changed fixtures name.
++func userPeer() *pb.Peer {
++	return &pb.Peer{
++		StableId:  "nFixture1CNTRL",
++		NodeName:  "macbook-portable.tail0123.ts.net.",
++		UserId:    3_641_851_097_756_277,
++		LoginName: "owner@example.com",
++	}
++}
++
++func command(c *pb.Command) proto.Message { return c }
++func event(e *pb.Event) proto.Message     { return e }
++
++// fixtures are the messages in fixtures/v1, one file each. shephrd's binding
++// checks its own values against the same files, so both languages agree on
++// the wire.
++var fixtures = map[string]proto.Message{
++	"command_up": command(&pb.Command{Body: &pb.Command_Up{Up: &pb.Up{
++		StateDir: "/home/owner/.local/state/shephrd/default/tailnet",
++		Hostname: "workstation-shephrd",
++		AuthKey:  proto.String("fixture-auth-key"),
++		Port:     7443,
++	}}}),
++	"command_login":      command(&pb.Command{Body: &pb.Command_Login{Login: &pb.Login{}}}),
++	"command_read_stats": command(&pb.Command{Body: &pb.Command_ReadStats{ReadStats: &pb.ReadStats{}}}),
++	"command_taken":      command(&pb.Command{Body: &pb.Command_Taken{Taken: &pb.Taken{Id: dialBit | 9}}}),
++	"command_dial": command(&pb.Command{Body: &pb.Command_Dial{Dial: &pb.Dial{
++		Id:   dialBit | 9,
++		Host: "workstation-shephrd",
++		Port: 7443,
++	}}}),
++	"event_hello": event(&pb.Event{Body: &pb.Event_Hello{Hello: &pb.Hello{
++		Abi:   1,
++		Build: "tailnet bcf6dd4cd0b4 tailscale 1.104.1",
++	}}}),
++	"event_ready": event(&pb.Event{Body: &pb.Event_Ready{Ready: &pb.Ready{}}}),
++	"event_stats": event(&pb.Event{Body: &pb.Event_Stats{Stats: &pb.Stats{
++		Goroutines:  41,
++		Connections: 2,
++	}}}),
++	"event_state_needs_login": event(&pb.Event{Body: &pb.Event_State{State: &pb.State{
++		State:    pb.NodeState_NODE_STATE_NEEDS_LOGIN,
++		LoginUrl: "https://login.tailscale.com/a/0123456789abcd",
++	}}}),
++	"event_caller": event(&pb.Event{Body: &pb.Event_Caller{Caller: &pb.Caller{
++		Id:   4,
++		Peer: userPeer(),
++	}}}),
++	"event_dialed": event(&pb.Event{Body: &pb.Event_Dialed{Dialed: &pb.Dialed{
++		Id:      dialBit | 9,
++		Address: "100.64.0.2",
++	}}}),
++	"event_dial_failed": event(&pb.Event{Body: &pb.Event_DialFailed{DialFailed: &pb.DialFailed{
++		Id:    dialBit | 9,
++		Error: "dial tcp 100.64.0.2:7443: connection refused",
++	}}}),
++	"event_peers_changed": event(&pb.Event{Body: &pb.Event_PeersChanged{PeersChanged: &pb.PeersChanged{
++		Peers: []*pb.Peer{
++			{
++				StableId:  "nFixture2CNTRL",
++				NodeName:  "ci-runner.tail0123.ts.net.",
++				UserId:    1,
++				LoginName: "tagged-devices",
++				Tags:      []string{"tag:ci"},
++			},
++			func() *pb.Peer { p := userPeer(); p.Removed = true; return p }(),
++		},
++	}}}),
++	"event_signal": event(&pb.Event{Body: &pb.Event_Signal{Signal: &pb.Signal{
++		Kind: pb.SignalKind_SIGNAL_KIND_TERM,
++	}}}),
++	"command_up_new_identity": command(&pb.Command{Body: &pb.Command_Up{Up: &pb.Up{
++		StateDir:    "/home/owner/.local/state/shephrd/default/tailnet",
++		Hostname:    "workstation-shephrd",
++		Port:        7443,
++		NewIdentity: true,
++	}}}),
++	"node_record": &pb.NodeRecord{
++		StableId:         "nFixture1CNTRL",
++		Name:             "workstation-shephrd.example.ts.net.",
++		TailscaleVersion: "1.104.1",
++	},
++}
++
++// TestFixtures encodes each fixture's value and compares the bytes with its
++// file, then decodes the file and compares the value. SHEPHRD_WRITE_FIXTURES=1
++// writes the files instead. A file without a value fails, so none goes stale.
++func TestFixtures(t *testing.T) {
++	write := os.Getenv("SHEPHRD_WRITE_FIXTURES") != ""
++	paths, err := filepath.Glob("fixtures/v1/*.binpb")
++	if err != nil {
++		t.Fatal(err)
++	}
++	for _, path := range paths {
++		name := filepath.Base(path)
++		if _, ok := fixtures[name[:len(name)-len(".binpb")]]; !ok {
++			t.Errorf("%s has no value in fixtures", path)
++		}
++	}
++	for name, value := range fixtures {
++		t.Run(name, func(t *testing.T) {
++			path := filepath.Join("fixtures/v1", name+".binpb")
++			encoded, err := proto.MarshalOptions{Deterministic: true}.Marshal(value)
++			if err != nil {
++				t.Fatalf("encode: %v", err)
++			}
++			if write {
++				if err := os.WriteFile(path, encoded, 0o644); err != nil {
++					t.Fatal(err)
++				}
++				return
++			}
++			file, err := os.ReadFile(path)
++			if err != nil {
++				t.Fatalf("%v; run `mise run tailnet:fixtures`", err)
++			}
++			if !bytes.Equal(encoded, file) {
++				t.Fatalf("the encoding differs from %s", path)
++			}
++			decoded := value.ProtoReflect().New().Interface()
++			if err := proto.Unmarshal(file, decoded); err != nil {
++				t.Fatalf("decode: %v", err)
++			}
++			if len(decoded.ProtoReflect().GetUnknown()) > 0 {
++				t.Fatalf("the fixture holds fields the Go types do not know")
++			}
++			if !proto.Equal(decoded, value) {
++				t.Fatalf("the decoded value differs from %s", path)
++			}
++		})
++	}
++}
+diff --git a/shephrd/tailnet/health.go b/shephrd/tailnet/health.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..bcd99d59cb77853d377f408a279119791293b2ce
+--- /dev/null
++++ b/shephrd/tailnet/health.go
+@@ -0,0 +1,26 @@
++package main
++
++import (
++	"slices"
++	"strings"
++
++	"tailscale.com/health"
++)
++
++// healthText joins tsnet's current health warnings into one line, ordered by
++// warnable, for a state event's error: it is how tsnet says why the node
++// cannot sign in or reach the control server. No warning gives "".
++func healthText(state *health.State) string {
++	codes := make([]health.WarnableCode, 0, len(state.Warnings))
++	for code := range state.Warnings {
++		codes = append(codes, code)
++	}
++	slices.Sort(codes)
++	texts := make([]string, 0, len(codes))
++	for _, code := range codes {
++		if text := state.Warnings[code].Text; text != "" {
++			texts = append(texts, text)
++		}
++	}
++	return strings.Join(texts, "; ")
++}
+diff --git a/shephrd/tailnet/health_test.go b/shephrd/tailnet/health_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..2d33fe7fdf6c5b9ad35759bc4fe0bc8652eeb571
+--- /dev/null
++++ b/shephrd/tailnet/health_test.go
+@@ -0,0 +1,24 @@
++package main
++
++import (
++	"testing"
++
++	"tailscale.com/health"
++)
++
++// TestHealthTextJoinsTheWarningsInOrder checks that every warning's text
++// reaches the state's error, in a stable order, and that none gives "".
++func TestHealthTextJoinsTheWarningsInOrder(t *testing.T) {
++	state := &health.State{Warnings: map[health.WarnableCode]health.UnhealthyState{
++		"network-status": {Text: "Tailscale cannot connect because the network is down."},
++		"login-state":    {Text: "You are logged out. The last login error was: connection refused"},
++		"empty":          {},
++	}}
++	want := "You are logged out. The last login error was: connection refused; Tailscale cannot connect because the network is down."
++	if got := healthText(state); got != want {
++		t.Errorf("healthText = %q, want %q", got, want)
++	}
++	if got := healthText(&health.State{}); got != "" {
++		t.Errorf("no warning gave %q", got)
++	}
++}
+diff --git a/shephrd/tailnet/identity.go b/shephrd/tailnet/identity.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..014f79e466fd9970a66872a8fc6d220789ee1a1a
+--- /dev/null
++++ b/shephrd/tailnet/identity.go
+@@ -0,0 +1,96 @@
++package main
++
++import (
++	"errors"
++	"fmt"
++	"io/fs"
++	"os"
++	"path/filepath"
++	"strings"
++	"time"
++
++	"google.golang.org/protobuf/proto"
++	"tailscale.com/atomicfile"
++	"tailscale.com/util/cmpver"
++
++	pb "tailscale.com/shephrd/tailnet/tailnetpb"
++)
++
++// recordFile is the node record the package keeps beside tsnet's state once
++// the node has run (tailnet-attach design, decision 5): it says the state
++// directory held a signed-in node, so a state that went missing is reported,
++// never replaced by a new identity. tsnet would treat an empty state file as
++// missing and sign in as a new device.
++const recordFile = "node.pb"
++
++// checkState returns why a node must not start from dir, run by Tailscale
++// version tailscale, or nil when it may.
++func checkState(dir, tailscale string) error {
++	bytes, err := os.ReadFile(filepath.Join(dir, recordFile))
++	if errors.Is(err, fs.ErrNotExist) {
++		return nil
++	}
++	if err != nil {
++		return fmt.Errorf("the tailnet node record cannot be read: %w", err)
++	}
++	record := new(pb.NodeRecord)
++	if err := proto.Unmarshal(bytes, record); err != nil {
++		return fmt.Errorf("the tailnet node record is corrupt: %w", err)
++	}
++	state, err := os.Stat(filepath.Join(dir, stateFile))
++	if errors.Is(err, fs.ErrNotExist) || (err == nil && state.Size() == 0) {
++		return fmt.Errorf("the tailnet state is gone: %s was signed in here; a new identity signs in as a new device", record.GetName())
++	}
++	if err != nil {
++		return fmt.Errorf("the tailnet state cannot be read: %w", err)
++	}
++	// tsnet has no downgrade path for its state.
++	if cmpver.Compare(record.GetTailscaleVersion(), tailscale) > 0 {
++		return fmt.Errorf("the tailnet state was written by Tailscale %s, newer than this build's %s", record.GetTailscaleVersion(), tailscale)
++	}
++	return nil
++}
++
++// ownsFile reports whether name, in a state directory, is the package's:
++// tsnet's state and logs, its certificates, and the node record. The core's
++// own files there stay where they are.
++func ownsFile(name string) bool {
++	return name == recordFile || name == "certs" || strings.HasPrefix(name, "tailscaled")
++}
++
++// setIdentityAside moves the package's files in dir into a replaced-<time>
++// directory beside them, so the next start signs in as a new device and the
++// old identity stays on disk.
++func setIdentityAside(dir string, now time.Time) error {
++	entries, err := os.ReadDir(dir)
++	if err != nil {
++		return fmt.Errorf("the tailnet state cannot be listed: %w", err)
++	}
++	aside := filepath.Join(dir, "replaced-"+now.UTC().Format("20060102T150405.000000000Z"))
++	made := false
++	for _, entry := range entries {
++		if !ownsFile(entry.Name()) {
++			continue
++		}
++		if !made {
++			if err := os.Mkdir(aside, 0o700); err != nil {
++				return fmt.Errorf("the old tailnet identity cannot be set aside: %w", err)
++			}
++			made = true
++		}
++		if err := os.Rename(filepath.Join(dir, entry.Name()), filepath.Join(aside, entry.Name())); err != nil {
++			return fmt.Errorf("the old tailnet identity cannot be set aside: %w", err)
++		}
++	}
++	return nil
++}
++
++// writeRecord stores record in dir, mode 0600, through a file renamed into
++// place, so a crash leaves the old record or the new one.
++func writeRecord(dir string, record *pb.NodeRecord) error {
++	bytes, err := proto.Marshal(record)
++	if err != nil {
++		return err
++	}
++	return atomicfile.WriteFile(filepath.Join(dir, recordFile), bytes, 0o600)
++}
+diff --git a/shephrd/tailnet/identity_test.go b/shephrd/tailnet/identity_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..db908bd7723113dd3845e7b20df7249dbe2ccc52
+--- /dev/null
++++ b/shephrd/tailnet/identity_test.go
+@@ -0,0 +1,97 @@
++package main
++
++import (
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	pb "tailscale.com/shephrd/tailnet/tailnetpb"
++)
++
++// recorded returns a state directory whose node ran under Tailscale ran,
++// with its state file holding state.
++func recorded(t *testing.T, ran string, state []byte) string {
++	t.Helper()
++	dir := t.TempDir()
++	record := &pb.NodeRecord{StableId: "nNODE", Name: "core.example.ts.net.", TailscaleVersion: ran}
++	if err := writeRecord(dir, record); err != nil {
++		t.Fatal(err)
++	}
++	if state != nil {
++		if err := os.WriteFile(filepath.Join(dir, stateFile), state, 0o600); err != nil {
++			t.Fatal(err)
++		}
++	}
++	return dir
++}
++
++// TestAStateThatOutlivedItsRecordIsRefused checks the guard decision 5 asks
++// for: a node record whose state went missing, emptied or came from a newer
++// Tailscale stops the node, where tsnet would sign in as a new device or
++// misread the state.
++func TestAStateThatOutlivedItsRecordIsRefused(t *testing.T) {
++	for _, test := range []struct {
++		name  string
++		dir   string
++		wants string
++	}{
++		{"no record", t.TempDir(), ""},
++		{"a signed-in state", recorded(t, "1.104.1", []byte(`{"_machinekey":"x"}`)), ""},
++		{"an older Tailscale's state", recorded(t, "1.98.0", []byte(`{}`)), ""},
++		{"a deleted state", recorded(t, "1.104.1", nil), "the tailnet state is gone"},
++		{"an emptied state", recorded(t, "1.104.1", []byte{}), "the tailnet state is gone"},
++		{"a newer Tailscale's state", recorded(t, "1.106.0", []byte(`{}`)), "newer than this build's 1.104.1"},
++	} {
++		err := checkState(test.dir, "1.104.1")
++		switch {
++		case test.wants == "" && err != nil:
++			t.Errorf("%s: %v", test.name, err)
++		case test.wants != "" && (err == nil || !strings.Contains(err.Error(), test.wants)):
++			t.Errorf("%s: got %v, want an error with %q", test.name, err, test.wants)
++		}
++	}
++	corrupt := t.TempDir()
++	if err := os.WriteFile(filepath.Join(corrupt, recordFile), []byte{0xff, 0xff}, 0o600); err != nil {
++		t.Fatal(err)
++	}
++	if err := checkState(corrupt, "1.104.1"); err == nil || !strings.Contains(err.Error(), "corrupt") {
++		t.Errorf("a corrupt record: got %v", err)
++	}
++}
++
++// TestANewIdentitySetsOnlyThePackagesFilesAside checks that a new identity
++// moves tsnet's state and the record aside, keeps the core's files, and
++// leaves a directory a fresh node starts from.
++func TestANewIdentitySetsOnlyThePackagesFilesAside(t *testing.T) {
++	dir := recorded(t, "1.104.1", []byte(`{}`))
++	if err := os.WriteFile(filepath.Join(dir, "up.binpb"), []byte("core"), 0o600); err != nil {
++		t.Fatal(err)
++	}
++	if err := setIdentityAside(dir, time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)); err != nil {
++		t.Fatal(err)
++	}
++	aside := filepath.Join(dir, "replaced-20261104T120000.000000000Z")
++	for _, name := range []string{stateFile, recordFile} {
++		if _, err := os.Stat(filepath.Join(aside, name)); err != nil {
++			t.Errorf("%s is not set aside: %v", name, err)
++		}
++		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
++			t.Errorf("%s is still in place: %v", name, err)
++		}
++	}
++	if _, err := os.Stat(filepath.Join(dir, "up.binpb")); err != nil {
++		t.Errorf("the core's file moved: %v", err)
++	}
++	if err := checkState(dir, "1.104.1"); err != nil {
++		t.Errorf("a fresh node is refused: %v", err)
++	}
++	info, err := os.Stat(filepath.Join(aside, recordFile))
++	if err != nil {
++		t.Fatal(err)
++	}
++	if mode := info.Mode().Perm(); mode != 0o600 {
++		t.Errorf("the record is mode %o, want 600", mode)
++	}
++}
+diff --git a/shephrd/tailnet/node.go b/shephrd/tailnet/node.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..5d02007ab1cea68d17d753a2e5144d70ce500ecd
+--- /dev/null
++++ b/shephrd/tailnet/node.go
+@@ -0,0 +1,545 @@
++package main
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"net"
++	"net/netip"
++	"os"
++	"path/filepath"
++	"runtime"
++	"strconv"
++	"sync"
++	"sync/atomic"
++	"time"
++
++	"tailscale.com/client/local"
++	"tailscale.com/control/controlclient"
++	"tailscale.com/ipn"
++	"tailscale.com/tailcfg"
++	"tailscale.com/tsnet"
++	"tailscale.com/version"
++
++	pb "tailscale.com/shephrd/tailnet/tailnetpb"
++)
++
++// stateFile is where tsnet keeps the node's identity in its state directory.
++const stateFile = "tailscaled.state"
++
++// node is the one tsnet node of the process (tailnet-attach design, decision
++// 2): two nodes in one process misroute each other's segments.
++//
++// One goroutine, run's, owns the node's state and handles commands in order.
++// Work that waits, on the control server or the IPN bus, runs on goroutines of
++// its own and hands its result back to run through later, tagged with the
++// generation it began in; a result from an earlier node is dropped, so it never
++// touches a node started after it.
++type node struct {
++	core *core
++
++	// later carries results back to run; done closes when run returns.
++	later chan func()
++	done  chan struct{}
++
++	// Owned by run's goroutine.
++	server   *tsnet.Server
++	client   *local.Client
++	stateDir string
++	cancel   context.CancelFunc
++	// gen rises with each node started and each stopped; live mirrors it for
++	// the exit hook, which runs on a goroutine of tsnet's.
++	gen  uint64
++	live atomic.Uint64
++	// last is the latest state event, which a repeated up sends again.
++	last *pb.Event
++
++	// ids numbers the connections the node accepts, from 1, so no caller's
++	// id has [dialBit] set.
++	ids atomic.Uint64
++
++	// stable maps each node id the package has seen to its stable id, so a
++	// removed peer can be named.
++	stableMu sync.Mutex
++	stable   map[tailcfg.NodeID]tailcfg.StableNodeID
++}
++
++func newNode(c *core) *node {
++	n := &node{
++		core:   c,
++		later:  make(chan func()),
++		done:   make(chan struct{}),
++		stable: map[tailcfg.NodeID]tailcfg.StableNodeID{},
++	}
++	// A control-ordered Debug.Exit stops the node, not the process (design,
++	// decision 11). The hook runs on the map session's goroutine, which
++	// stopping the node waits for, so it only hands the stop to run.
++	controlclient.ExitHook = func(code int) {
++		// The node generation at the moment of the hook: a down and an up that
++		// run before the stop is carried out leave the new node alone.
++		gen := n.live.Load()
++		go n.handFor(gen, func() {
++			if n.stop() {
++				n.report(stateEvent(pb.NodeState_NODE_STATE_FAILED, "", fmt.Sprintf("the control server stopped this node (code %d)", code)))
++			}
++		})
++	}
++	return n
++}
++
++// run carries out commands and hands-back until commands closes, then stops
++// the node.
++func (n *node) run(commands <-chan *pb.Command) {
++	defer close(n.done)
++	defer n.stop()
++	for {
++		select {
++		case command, ok := <-commands:
++			if !ok {
++				return
++			}
++			n.carryOut(command)
++		case f := <-n.later:
++			f()
++		}
++	}
++}
++
++// hand runs f on run's goroutine, unless run has returned.
++func (n *node) hand(f func()) {
++	select {
++	case n.later <- f:
++	case <-n.done:
++	}
++}
++
++// handFor runs f on run's goroutine if the node is still generation gen.
++func (n *node) handFor(gen uint64, f func()) {
++	n.hand(func() {
++		if n.gen == gen {
++			f()
++		}
++	})
++}
++
++func (n *node) carryOut(command *pb.Command) {
++	switch body := command.GetBody().(type) {
++	case *pb.Command_Up:
++		n.up(body.Up)
++	case *pb.Command_Down:
++		n.stop()
++		n.report(stateEvent(pb.NodeState_NODE_STATE_STOPPED, "", ""))
++	case *pb.Command_Login:
++		n.login()
++	case *pb.Command_Logout:
++		n.logout()
++	case *pb.Command_Dial:
++		n.dial(body.Dial)
++	case *pb.Command_Taken:
++		n.core.taken(body.Taken.GetId())
++	case *pb.Command_ReadStats:
++		// Both counts stay far below 2^32.
++		n.core.send(&pb.Event{Body: &pb.Event_Stats{Stats: &pb.Stats{
++			Goroutines:  uint32(runtime.NumGoroutine()),
++			Connections: uint32(pumping.Load()),
++		}}})
++	}
++}
++
++func (n *node) up(up *pb.Up) {
++	// Up on a running node changes nothing and answers ready again, then the
++	// latest state, which says whether it runs or waits for a sign-in; a new
++	// port or hostname takes a down first. A new identity stops it first.
++	if n.server != nil && !up.GetNewIdentity() {
++		n.core.send(&pb.Event{Body: &pb.Event_Ready{Ready: &pb.Ready{}}})
++		if n.last != nil {
++			n.core.send(n.last)
++		}
++		return
++	}
++	n.stop()
++	// The state is checked before tsnet reads it: tsnet would sign in as a
++	// new device in place of a state that went missing (design, decision 5).
++	refused := func(err error) {
++		n.report(stateEvent(pb.NodeState_NODE_STATE_FAILED, "", err.Error()))
++	}
++	if up.GetNewIdentity() {
++		if err := setIdentityAside(up.GetStateDir(), time.Now()); err != nil {
++			refused(err)
++			return
++		}
++	}
++	if err := checkState(up.GetStateDir(), version.Short()); err != nil {
++		refused(err)
++		return
++	}
++	// No log upload and no socket-statistics log: the archive is built with
++	// ts_omit_logtail, so neither exists, and the package never sets an
++	// environment variable, which cgo would race against the core's threads
++	// (design, decision 5).
++	server := &tsnet.Server{
++		Dir:        up.GetStateDir(),
++		Hostname:   up.GetHostname(),
++		AuthKey:    up.GetAuthKey(),
++		ControlURL: up.GetControlUrl(),
++		Logf:       logf("tailnet"),
++		UserLogf:   logf("tailnet"),
++	}
++	// The generation is the new node's before tsnet starts, so an exit the
++	// control server orders during start-up or sign-in reaches it.
++	n.gen++
++	n.live.Store(n.gen)
++	failed := func(err error) {
++		server.Close()
++		n.report(stateEvent(pb.NodeState_NODE_STATE_FAILED, "", err.Error()))
++	}
++	if err := server.Start(); err != nil {
++		failed(err)
++		return
++	}
++	client, err := server.LocalClient()
++	if err != nil {
++		failed(err)
++		return
++	}
++	listener, err := server.Listen("tcp", ":"+strconv.FormatUint(uint64(up.GetPort()), 10))
++	if err != nil {
++		failed(err)
++		return
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	n.server, n.client, n.stateDir, n.cancel, n.last = server, client, up.GetStateDir(), cancel, nil
++	go n.watch(ctx, n.gen, server, client)
++	go n.accept(ctx, listener, client)
++	n.core.send(&pb.Event{Body: &pb.Event_Ready{Ready: &pb.Ready{}}})
++}
++
++// stop stops the node, if one runs, waits for tsnet to close, and reports
++// whether one ran. Results of work begun on it are dropped from then on.
++func (n *node) stop() bool {
++	if n.server == nil {
++		return false
++	}
++	n.cancel()
++	n.server.Close()
++	n.server, n.client, n.cancel, n.last = nil, nil, nil, nil
++	n.gen++
++	n.live.Store(n.gen)
++	return true
++}
++
++func (n *node) login() {
++	client, gen := n.client, n.gen
++	if client == nil {
++		return
++	}
++	// The control server answers when it will; the loop keeps carrying out
++	// commands meanwhile.
++	go func() {
++		if err := client.StartLoginInteractive(context.Background()); err != nil {
++			n.handFor(gen, func() {
++				n.report(stateEvent(pb.NodeState_NODE_STATE_NEEDS_LOGIN, "", err.Error()))
++			})
++		}
++	}()
++}
++
++// logout signs the node out at the control server, then stops it and deletes
++// its identity, so the next up signs in as a new device. A logout whose node
++// stopped or changed before the control server answered leaves the state on
++// disk alone.
++func (n *node) logout() {
++	client, dir, gen := n.client, n.stateDir, n.gen
++	if client == nil {
++		return
++	}
++	go func() {
++		logoutErr := client.Logout(context.Background())
++		n.hand(func() {
++			if n.gen != gen {
++				if logoutErr != nil {
++					n.core.send(stateEvent(pb.NodeState_NODE_STATE_STOPPED, "", logoutErr.Error()))
++				}
++				return
++			}
++			n.stop()
++			// The record goes with the state: the next up signs in afresh.
++			var removeErr error
++			for _, name := range []string{stateFile, recordFile} {
++				if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
++					removeErr = errors.Join(removeErr, err)
++				}
++			}
++			problem := ""
++			if err := errors.Join(logoutErr, removeErr); err != nil {
++				problem = err.Error()
++			}
++			n.report(stateEvent(pb.NodeState_NODE_STATE_STOPPED, "", problem))
++		})
++	}()
++}
++
++// dialBit marks a dial's id, so its descriptor and a caller's share the
++// connections socket; callers are numbered from 1 and never reach it.
++const dialBit = uint64(1) << 63
++
++func (n *node) dial(dial *pb.Dial) {
++	server := n.server
++	failed := func(err error) {
++		n.core.send(&pb.Event{Body: &pb.Event_DialFailed{DialFailed: &pb.DialFailed{Id: dial.GetId(), Error: err.Error()}}})
++	}
++	if dial.GetId()&dialBit == 0 {
++		failed(errors.New("a dial's id must have the top bit set"))
++		return
++	}
++	if server == nil {
++		failed(errors.New("the tailnet node is not running"))
++		return
++	}
++	// A dial ends with its own event and descriptor, and touches no node
++	// state, so it runs on its own; on a node stopped meanwhile it fails.
++	go func() {
++		address := net.JoinHostPort(dial.GetHost(), strconv.FormatUint(uint64(dial.GetPort()), 10))
++		conn, err := server.Dial(context.Background(), "tcp", address)
++		if err != nil {
++			failed(err)
++			return
++		}
++		remote, err := netip.ParseAddrPort(conn.RemoteAddr().String())
++		if err != nil {
++			conn.Close()
++			failed(err)
++			return
++		}
++		fd, err := pump(conn)
++		if err != nil {
++			conn.Close()
++			failed(err)
++			return
++		}
++		// The descriptor goes first, so it waits on the socket when the core
++		// reads the event.
++		if err := n.core.sendFd(dial.GetId(), fd); err != nil {
++			failed(err)
++			return
++		}
++		n.core.send(&pb.Event{Body: &pb.Event_Dialed{Dialed: &pb.Dialed{Id: dial.GetId(), Address: remote.Addr().String()}}})
++	}()
++}
++
++// accept hands each caller to the core with its WhoIs identity. A caller
++// WhoIs cannot name arrives without a peer, and the core refuses it.
++func (n *node) accept(ctx context.Context, listener net.Listener, client *local.Client) {
++	defer listener.Close()
++	go func() {
++		<-ctx.Done()
++		listener.Close()
++	}()
++	for {
++		conn, err := listener.Accept()
++		if err != nil {
++			return
++		}
++		go n.handOver(ctx, conn, client)
++	}
++}
++
++func (n *node) handOver(ctx context.Context, conn net.Conn, client *local.Client) {
++	id := n.ids.Add(1)
++	caller := &pb.Caller{Id: id}
++	if who, err := client.WhoIs(ctx, conn.RemoteAddr().String()); err == nil && who.Node != nil && who.UserProfile != nil {
++		n.remember(who.Node.ID, who.Node.StableID)
++		caller.Peer = &pb.Peer{
++			StableId:  string(who.Node.StableID),
++			NodeName:  who.Node.Name,
++			UserId:    uint64(who.UserProfile.ID),
++			LoginName: who.UserProfile.LoginName,
++			Tags:      who.Node.Tags,
++			Shared:    who.Node.Sharer != 0,
++		}
++	}
++	fd, err := pump(conn)
++	if err != nil {
++		// As at the open-file limit: the caller sees its connection close.
++		fmt.Fprintf(os.Stderr, "tailnet: connection %d not carried: %v\n", id, err)
++		conn.Close()
++		return
++	}
++	if err := n.core.sendFd(id, fd); err != nil {
++		fmt.Fprintf(os.Stderr, "tailnet: connection %d not handed over: %v\n", id, err)
++		return
++	}
++	n.core.send(&pb.Event{Body: &pb.Event_Caller{Caller: caller}})
++}
++
++func (n *node) remember(id tailcfg.NodeID, stable tailcfg.StableNodeID) {
++	n.stableMu.Lock()
++	defer n.stableMu.Unlock()
++	n.stable[id] = stable
++}
++
++// watch reads the node's state, sign-in link and peer changes from the IPN
++// bus until ctx ends, and hands each to run as generation gen's.
++func (n *node) watch(ctx context.Context, gen uint64, server *tsnet.Server, client *local.Client) {
++	watcher, err := client.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyPeerChanges|ipn.NotifyInitialHealthState)
++	if err != nil {
++		if ctx.Err() == nil {
++			n.handFor(gen, func() {
++				n.stop()
++				n.report(stateEvent(pb.NodeState_NODE_STATE_FAILED, "", err.Error()))
++			})
++		}
++		return
++	}
++	defer watcher.Close()
++	report := func(event *pb.Event) {
++		n.handFor(gen, func() { n.report(event) })
++	}
++	// Every state event carries the sign-in link while the node waits for
++	// one, and tsnet's health warnings, so a later event does not drop
++	// either: tsnet tells why a sign-in cannot start, such as a control
++	// server it cannot reach, only through its health.
++	current := ipn.NoState
++	var signIn signIns
++	link, warnings := "", ""
++	for {
++		notify, err := watcher.Next()
++		if err != nil {
++			return
++		}
++		if notify.Health != nil {
++			warnings = healthText(notify.Health)
++			if notify.State == nil {
++				n.readState(ctx, server, client, current, link, warnings, report)
++			}
++		}
++		if notify.State != nil {
++			current = *notify.State
++			if current != ipn.NeedsLogin {
++				link = ""
++			}
++			n.readState(ctx, server, client, current, link, warnings, report)
++			if signIn.again(current) {
++				if err := client.StartLoginInteractive(ctx); err != nil && ctx.Err() == nil {
++					report(stateEvent(pb.NodeState_NODE_STATE_NEEDS_LOGIN, link, err.Error()))
++				}
++			}
++		}
++		if notify.BrowseToURL != nil && *notify.BrowseToURL != "" {
++			link = *notify.BrowseToURL
++			report(stateEvent(pb.NodeState_NODE_STATE_NEEDS_LOGIN, link, warnings))
++		}
++		if notify.ErrMessage != nil {
++			n.readState(ctx, server, client, current, link, *notify.ErrMessage, report)
++		}
++		if peers := n.peers(notify); len(peers) > 0 {
++			event := &pb.Event{Body: &pb.Event_PeersChanged{PeersChanged: &pb.PeersChanged{Peers: peers}}}
++			n.handFor(gen, func() { n.core.send(event) })
++		}
++	}
++}
++
++// signIns decides when a node needs a new sign-in link. tsnet asks for one
++// at start, so the package asks again only when a node that ran needs a
++// sign-in, which means its key expired (design, decision 5). Asking at start
++// as well would make tsnet register a second node key, which the control
++// server would take for another device.
++type signIns struct {
++	// ran is whether the node has run since its last sign-in.
++	ran bool
++}
++
++// again reports whether the node, now in state, needs a new sign-in link.
++func (s *signIns) again(state ipn.State) bool {
++	switch state {
++	case ipn.Running:
++		s.ran = true
++	case ipn.NeedsLogin:
++		again := s.ran
++		s.ran = false
++		return again
++	}
++	return false
++}
++
++// readState turns an IPN state into a state event for report, reading the
++// running node's name and addresses first.
++func (n *node) readState(ctx context.Context, server *tsnet.Server, client *local.Client, state ipn.State, link, problem string, report func(*pb.Event)) {
++	switch state {
++	case ipn.Running:
++		event := stateEvent(pb.NodeState_NODE_STATE_RUNNING, "", problem)
++		if status, err := client.StatusWithoutPeers(ctx); err == nil && status.Self != nil {
++			event.GetState().Name = status.Self.DNSName
++			// The record says this directory now holds a signed-in node.
++			record := &pb.NodeRecord{
++				StableId:         string(status.Self.ID),
++				Name:             status.Self.DNSName,
++				TailscaleVersion: version.Short(),
++			}
++			if err := writeRecord(server.Dir, record); err != nil {
++				event.GetState().Error = fmt.Sprintf("the tailnet node record cannot be written: %v", err)
++			}
++		}
++		ip4, ip6 := server.TailscaleIPs()
++		for _, ip := range []string{ip4.String(), ip6.String()} {
++			if ip != "invalid IP" {
++				event.GetState().Addresses = append(event.GetState().Addresses, ip)
++			}
++		}
++		report(event)
++	case ipn.NeedsLogin:
++		report(stateEvent(pb.NodeState_NODE_STATE_NEEDS_LOGIN, link, problem))
++	case ipn.Stopped:
++		report(stateEvent(pb.NodeState_NODE_STATE_STOPPED, "", problem))
++	default:
++		report(stateEvent(pb.NodeState_NODE_STATE_STARTING, "", problem))
++	}
++}
++
++// peers is each peer the notification changed or removed.
++func (n *node) peers(notify ipn.Notify) []*pb.Peer {
++	var peers []*pb.Peer
++	for _, changed := range notify.PeersChanged {
++		n.remember(changed.ID, changed.StableID)
++		peers = append(peers, &pb.Peer{
++			StableId: string(changed.StableID),
++			NodeName: changed.Name,
++			UserId:   uint64(changed.User),
++			Tags:     changed.Tags,
++			Shared:   changed.Sharer != 0,
++		})
++	}
++	n.stableMu.Lock()
++	defer n.stableMu.Unlock()
++	for _, id := range notify.PeersRemoved {
++		stable, ok := n.stable[id]
++		if !ok {
++			continue
++		}
++		delete(n.stable, id)
++		peers = append(peers, &pb.Peer{StableId: string(stable), Removed: true})
++	}
++	return peers
++}
++
++// report sends a state event and keeps it as the node's latest; it runs on
++// run's goroutine.
++func (n *node) report(event *pb.Event) {
++	n.last = event
++	n.core.send(event)
++}
++
++func stateEvent(state pb.NodeState, loginURL, problem string) *pb.Event {
++	return &pb.Event{Body: &pb.Event_State{State: &pb.State{State: state, LoginUrl: loginURL, Error: problem}}}
++}
++
++// logf prints tsnet's log to stderr, which shephrdd writes to core.log, when
++// SHEPHRD_TAILNET_LOG is set; otherwise it drops it.
++func logf(prefix string) func(string, ...any) {
++	if os.Getenv("SHEPHRD_TAILNET_LOG") == "" {
++		return func(string, ...any) {}
++	}
++	return func(format string, args ...any) {
++		fmt.Fprintf(os.Stderr, "%s: %s\n", prefix, fmt.Sprintf(format, args...))
++	}
++}
+diff --git a/shephrd/tailnet/node_test.go b/shephrd/tailnet/node_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..ba06d38645ad9d41c0f9b449597c0d1fdacb6696
+--- /dev/null
++++ b/shephrd/tailnet/node_test.go
+@@ -0,0 +1,35 @@
++package main
++
++import (
++	"testing"
++
++	"tailscale.com/ipn"
++)
++
++// TestASignInIsAskedForOnlyAfterTheNodeRan walks the states a node passes
++// through: the sign-in tsnet asks for at start is not asked for again, and a
++// node that ran and then needs a sign-in, as when its key expires, gets a new
++// link once.
++func TestASignInIsAskedForOnlyAfterTheNodeRan(t *testing.T) {
++	steps := []struct {
++		state ipn.State
++		again bool
++	}{
++		{ipn.NoState, false},
++		{ipn.NeedsLogin, false},
++		{ipn.Starting, false},
++		{ipn.Running, false},
++		{ipn.NeedsLogin, true},
++		{ipn.NeedsLogin, false},
++		{ipn.Starting, false},
++		{ipn.Running, false},
++		{ipn.Stopped, false},
++		{ipn.NeedsLogin, true},
++	}
++	var signIn signIns
++	for i, step := range steps {
++		if got := signIn.again(step.state); got != step.again {
++			t.Errorf("step %d, %v: again = %v, want %v", i, step.state, got, step.again)
++		}
++	}
++}
+diff --git a/shephrd/tailnet/proto/shephrd/tailnet/v1/tailnet.proto b/shephrd/tailnet/proto/shephrd/tailnet/v1/tailnet.proto
+new file mode 100644
+index 0000000000000000000000000000000000000000..790c9cca0f1864a9176bafdabd324864f506b8a4
+--- /dev/null
++++ b/shephrd/tailnet/proto/shephrd/tailnet/v1/tailnet.proto
+@@ -0,0 +1,244 @@
++// The messages between shephrdd and its tailnet package, version 1.
++//
++// They travel on the control socketpair in frames: a 4-byte little-endian
++// body length, then one Command (core to package) or Event (package to
++// core). The rules in shephrd/tailnet/README.md apply: additions only within
++// v1, fields in number order, no map fields, an UNSPECIFIED zero value in
++// every enum, reserved numbers for removed fields, and a comment on every
++// element.
++syntax = "proto3";
++
++package shephrd.tailnet.v1;
++
++option go_package = "tailscale.com/shephrd/tailnet/tailnetpb";
++
++// Every message the core sends to the package.
++message Command {
++  // The command; an arm the package does not know is ignored.
++  oneof body {
++    // Starts the node.
++    Up up = 1;
++    // Stops the node and keeps its state.
++    Down down = 2;
++    // Asks the control server for a new sign-in link.
++    Login login = 3;
++    // Signs the node out and forgets its identity.
++    Logout logout = 4;
++    // Opens a connection to another node.
++    Dial dial = 5;
++    // Asks for the package's counts, which a stats event answers.
++    ReadStats read_stats = 6;
++    // Says the core holds a handed connection's descriptor.
++    Taken taken = 7;
++  }
++}
++
++// Every message the package sends to the core.
++message Event {
++  // The event; an arm the core does not know is ignored.
++  oneof body {
++    // The package's first message.
++    Hello hello = 1;
++    // The node listens on the core's port.
++    Ready ready = 2;
++    // The node's state after a change.
++    State state = 3;
++    // A connection arrived; its descriptor travels on the connections socket.
++    Caller caller = 4;
++    // A dial connected; its descriptor travels on the connections socket.
++    Dialed dialed = 5;
++    // A dial failed.
++    DialFailed dial_failed = 6;
++    // Peers of the tailnet changed.
++    PeersChanged peers_changed = 7;
++    // The process received a signal the package owns.
++    Signal signal = 8;
++    // The package's counts, answering a read stats.
++    Stats stats = 9;
++  }
++}
++
++// The package's first message on the control socket.
++message Hello {
++  // The C interface's version, which the core compares with its own.
++  uint32 abi = 1;
++  // The package's build: its source tree hash and Tailscale's version.
++  string build = 2;
++}
++
++// Starts the node, signing in with the stored identity, with the auth key, or
++// by the link a NEEDS_LOGIN state carries. On a running node it changes
++// nothing and answers ready again: a new port or hostname takes a down first.
++message Up {
++  // The directory that holds the node's state, created mode 0700 by the core.
++  string state_dir = 1;
++  // The device name.
++  string hostname = 2;
++  // A key that signs the node in without a link; the package never stores or
++  // logs it.
++  optional string auth_key = 3;
++  // The control server's URL; empty means Tailscale's.
++  string control_url = 4;
++  // The TCP port the node accepts the core's callers on.
++  uint32 port = 5;
++  // Sets the node's identity aside first, so it signs in as a new device; a
++  // running node stops first. Without it, a state directory whose node record
++  // outlived its state fails rather than sign in afresh.
++  bool new_identity = 6;
++}
++
++// Stops the node; its state stays for the next up.
++message Down {}
++
++// Asks the control server for a new sign-in link, for a node that needs one.
++message Login {}
++
++// Signs the node out at the control server and deletes its state.
++message Logout {}
++
++// Opens a TCP connection to a node of the tailnet.
++message Dial {
++  // Chosen by the core, unique among its dials in flight, with the top bit
++  // set, which a caller's id never has, so the two share the connections
++  // socket; the answer and the descriptor carry it. A dial whose id lacks the
++  // bit fails.
++  uint64 id = 1;
++  // The node's MagicDNS name or tailnet address.
++  string host = 2;
++  // The TCP port.
++  uint32 port = 3;
++}
++
++// Asks for the package's counts.
++message ReadStats {}
++
++// The core took connection `id` off the connections socket, with its
++// descriptor or without it, so the package closes its own copy. Until then the
++// package keeps that copy open: on macOS a socket in flight can break when its
++// sender closes the last other copy before the receiver reads it.
++message Taken {
++  // The connection's id, a caller's or a dial's.
++  uint64 id = 1;
++}
++
++// The node listens on the port the last up named.
++message Ready {}
++
++// The state of the node.
++enum NodeState {
++  // Not set.
++  NODE_STATE_UNSPECIFIED = 0;
++  // No node runs.
++  NODE_STATE_STOPPED = 1;
++  // The node is starting or reconnecting to the control server.
++  NODE_STATE_STARTING = 2;
++  // The node waits for a sign-in by the login link.
++  NODE_STATE_NEEDS_LOGIN = 3;
++  // The node is on the tailnet.
++  NODE_STATE_RUNNING = 4;
++  // The node stopped on an error it cannot recover from alone.
++  NODE_STATE_FAILED = 5;
++}
++
++// The node's state after a change.
++message State {
++  // The state.
++  NodeState state = 1;
++  // The sign-in link, while the state is NEEDS_LOGIN.
++  string login_url = 2;
++  // The node's MagicDNS name, once the control server has named it.
++  string name = 3;
++  // The node's tailnet addresses, while it runs.
++  repeated string addresses = 4;
++  // Why the state is FAILED, or a health warning in another state.
++  string error = 5;
++}
++
++// Who a connection came from, as WhoIs reports it.
++message Caller {
++  // The connection's id, which its descriptor carries on the connections
++  // socket. It never has the top bit set, which marks a dial's id.
++  uint64 id = 1;
++  // The caller's identity.
++  Peer peer = 2;
++}
++
++// A node of the tailnet and the user who owns it.
++message Peer {
++  // The node's stable id.
++  string stable_id = 1;
++  // The node's MagicDNS name.
++  string node_name = 2;
++  // The owning user's id; for a tagged node, the id Tailscale gives tagged
++  // devices.
++  uint64 user_id = 3;
++  // The owning user's login name.
++  string login_name = 4;
++  // The node's ACL tags; empty for a user-owned node.
++  repeated string tags = 5;
++  // The node is shared in from another tailnet.
++  bool shared = 6;
++  // In a peers-changed event: the node left the tailnet.
++  bool removed = 7;
++}
++
++// A dial connected.
++message Dialed {
++  // The dial's id, which the descriptor carries on the connections socket.
++  uint64 id = 1;
++  // The remote node's tailnet address the connection reached.
++  string address = 2;
++}
++
++// A dial failed.
++message DialFailed {
++  // The dial's id.
++  uint64 id = 1;
++  // Why.
++  string error = 2;
++}
++
++// Peers of the tailnet changed: each one that changed or left.
++message PeersChanged {
++  // The peers, as they are now.
++  repeated Peer peers = 1;
++}
++
++// A signal the package owns.
++enum SignalKind {
++  // Not set.
++  SIGNAL_KIND_UNSPECIFIED = 0;
++  // SIGTERM.
++  SIGNAL_KIND_TERM = 1;
++  // SIGINT.
++  SIGNAL_KIND_INT = 2;
++}
++
++// The process received a signal; the core shuts down as it would on Stop.
++message Signal {
++  // Which signal.
++  SignalKind kind = 1;
++}
++
++// The node record the package keeps as node.pb in the state directory, mode
++// 0600, once the node has run. It says the directory held a signed-in node,
++// so a state that went missing fails the next up rather than sign in afresh;
++// the core never reads it.
++message NodeRecord {
++  // The node's stable id.
++  string stable_id = 1;
++  // The node's MagicDNS name.
++  string name = 2;
++  // The Tailscale version that last ran the node; a state from a newer one is
++  // refused, as tsnet has no downgrade path.
++  string tailscale_version = 3;
++}
++
++// The package's counts, for a core to log and its tests to bound.
++message Stats {
++  // The process's goroutines, Go's runtime.NumGoroutine.
++  uint32 goroutines = 1;
++  // The connections the package carries for the core: accepted and dialed,
++  // until both their directions end.
++  uint32 connections = 2;
++}
+diff --git a/shephrd/tailnet/serve_test.go b/shephrd/tailnet/serve_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..8b7ebc8801eef401f0371be9393ffba2f9658803
+--- /dev/null
++++ b/shephrd/tailnet/serve_test.go
+@@ -0,0 +1,76 @@
++package main
++
++import (
++	"encoding/binary"
++	"io"
++	"net"
++	"os"
++	"syscall"
++	"testing"
++	"time"
++
++	"google.golang.org/protobuf/proto"
++
++	pb "tailscale.com/shephrd/tailnet/tailnetpb"
++)
++
++// pair returns both ends of a Unix socketpair of kind as connections.
++func pair(t *testing.T, kind int) (net.Conn, net.Conn) {
++	t.Helper()
++	fds, err := syscall.Socketpair(syscall.AF_UNIX, kind, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var conns [2]net.Conn
++	for i, fd := range fds {
++		file := os.NewFile(uintptr(fd), "pair")
++		conn, err := net.FileConn(file)
++		file.Close()
++		if err != nil {
++			t.Fatal(err)
++		}
++		t.Cleanup(func() { conn.Close() })
++		conns[i] = conn
++	}
++	return conns[0], conns[1]
++}
++
++// nextEvent reads one framed event from the core's end.
++func nextEvent(t *testing.T, conn net.Conn) *pb.Event {
++	t.Helper()
++	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
++	var header [4]byte
++	if _, err := io.ReadFull(conn, header[:]); err != nil {
++		t.Fatal(err)
++	}
++	body := make([]byte, binary.LittleEndian.Uint32(header[:]))
++	if _, err := io.ReadFull(conn, body); err != nil {
++		t.Fatal(err)
++	}
++	event := new(pb.Event)
++	if err := proto.Unmarshal(body, event); err != nil {
++		t.Fatal(err)
++	}
++	return event
++}
++
++// TestASignalRightAfterTheHelloIsForwarded sends SIGTERM to this process the
++// moment the hello arrives, as a supervisor may stop a core right after its
++// ready line: the package's handler must already be installed, or the signal
++// would end the test process, and the hello stays the first event.
++func TestASignalRightAfterTheHelloIsForwarded(t *testing.T) {
++	core, control := pair(t, syscall.SOCK_STREAM)
++	_, conns := pair(t, syscall.SOCK_STREAM)
++	go serve(newCore(control, conns.(*net.UnixConn)))
++
++	if nextEvent(t, core).GetHello() == nil {
++		t.Fatal("the first event is not the hello")
++	}
++	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
++		t.Fatal(err)
++	}
++	signal := nextEvent(t, core).GetSignal()
++	if signal.GetKind() != pb.SignalKind_SIGNAL_KIND_TERM {
++		t.Fatalf("the event after the hello is not SIGTERM: %v", signal)
++	}
++}
+diff --git a/shephrd/tailnet/sock_darwin.go b/shephrd/tailnet/sock_darwin.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..3a37994d8e8b37299c0ec44d8297764b06ebc8b2
+--- /dev/null
++++ b/shephrd/tailnet/sock_darwin.go
+@@ -0,0 +1,17 @@
++package main
++
++import "syscall"
++
++// socketpair creates the pair under ForkLock and marks both ends
++// close-on-exec, since macOS has no SOCK_CLOEXEC; a fork from a thread that
++// Go does not know of can still copy them in between.
++func socketpair() ([2]int, error) {
++	syscall.ForkLock.RLock()
++	defer syscall.ForkLock.RUnlock()
++	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
++	if err == nil {
++		syscall.CloseOnExec(fds[0])
++		syscall.CloseOnExec(fds[1])
++	}
++	return fds, err
++}
+diff --git a/shephrd/tailnet/sock_linux.go b/shephrd/tailnet/sock_linux.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..4074fbd99a84ef898d0ac714a38bfdb25f34992b
+--- /dev/null
++++ b/shephrd/tailnet/sock_linux.go
+@@ -0,0 +1,8 @@
++package main
++
++import "syscall"
++
++// socketpair creates both ends close-on-exec atomically.
++func socketpair() ([2]int, error) {
++	return syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
++}
+diff --git a/shephrd/tailnet/tailnet.go b/shephrd/tailnet/tailnet.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..8a23cec42c3cfd01265f713f4485959e1dd5da03
+--- /dev/null
++++ b/shephrd/tailnet/tailnet.go
+@@ -0,0 +1,71 @@
++// Package main is shephrd's tailnet package, built with -buildmode=c-archive
++// into libshephrdtailnet.a, which shephrdd links. The C interface is two
++// functions; everything else crosses the two sockets shephrd_tailnet_start
++// takes as messages of tailnetpb, generated from proto/. README.md has the
++// rules.
++package main
++
++/*
++#include <stdint.h>
++*/
++import "C"
++
++import (
++	"fmt"
++	"net"
++	"os"
++)
++
++// abi is the version of the C interface. It rises with every change to an
++// exported function's name, signature or meaning.
++const abi = 1
++
++// commit is the fork commit the archive was built from, set with -ldflags
++// "-X main.commit=‚Ä¶"; the package reports it in its hello.
++var commit string
++
++// shephrd_tailnet_abi returns the C interface's version.
++//
++//export shephrd_tailnet_abi
++func shephrd_tailnet_abi() C.uint32_t {
++	return abi
++}
++
++// shephrd_tailnet_start takes ownership of two descriptors the core made: one
++// end of a stream socketpair that carries framed commands and events, and one
++// end of a second stream socketpair that carries each connection's descriptor
++// with its id. It returns 0 at once and serves until the control socket closes, or
++// -1 when either descriptor is not a socket.
++//
++//export shephrd_tailnet_start
++func shephrd_tailnet_start(control, conns C.int) C.int {
++	controlConn, err := adopt(int(control), "tailnet-control")
++	if err != nil {
++		fmt.Fprintf(os.Stderr, "tailnet: control socket: %v\n", err)
++		return -1
++	}
++	connsConn, err := adopt(int(conns), "tailnet-conns")
++	if err != nil {
++		controlConn.Close()
++		fmt.Fprintf(os.Stderr, "tailnet: connections socket: %v\n", err)
++		return -1
++	}
++	unix, ok := connsConn.(*net.UnixConn)
++	if !ok {
++		controlConn.Close()
++		connsConn.Close()
++		return -1
++	}
++	go serve(newCore(controlConn, unix))
++	return 0
++}
++
++// adopt wraps a descriptor the core handed over in a net.Conn on Go's poller,
++// and closes the original, which net.FileConn duplicated.
++func adopt(fd int, name string) (net.Conn, error) {
++	file := os.NewFile(uintptr(fd), name)
++	defer file.Close()
++	return net.FileConn(file)
++}
++
++func main() {}
+diff --git a/shephrd/tailnet/tailnetpb/tailnet.pb.go b/shephrd/tailnet/tailnetpb/tailnet.pb.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..e1c7d410791c426b70414f69d2acee82ead53a79
+--- /dev/null
++++ b/shephrd/tailnet/tailnetpb/tailnet.pb.go
+@@ -0,0 +1,1758 @@
++// The messages between shephrdd and its tailnet package, version 1.
++//
++// They travel on the control socketpair in frames: a 4-byte little-endian
++// body length, then one Command (core to package) or Event (package to
++// core). The rules in shephrd/tailnet/README.md apply: additions only within
++// v1, fields in number order, no map fields, an UNSPECIFIED zero value in
++// every enum, reserved numbers for removed fields, and a comment on every
++// element.
++
++// Code generated by protoc-gen-go. DO NOT EDIT.
++// versions:
++// 	protoc-gen-go v1.36.12
++// 	protoc        v7.36.2
++// source: shephrd/tailnet/v1/tailnet.proto
++
++package tailnetpb
++
++import (
++	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
++	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
++	reflect "reflect"
++	sync "sync"
++	unsafe "unsafe"
++)
++
++const (
++	// Verify that this generated code is sufficiently up-to-date.
++	_ = protoimpl.EnforceVersion(20 - protoimpl.MinVersion)
++	// Verify that runtime/protoimpl is sufficiently up-to-date.
++	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
++)
++
++// The state of the node.
++type NodeState int32
++
++const (
++	// Not set.
++	NodeState_NODE_STATE_UNSPECIFIED NodeState = 0
++	// No node runs.
++	NodeState_NODE_STATE_STOPPED NodeState = 1
++	// The node is starting or reconnecting to the control server.
++	NodeState_NODE_STATE_STARTING NodeState = 2
++	// The node waits for a sign-in by the login link.
++	NodeState_NODE_STATE_NEEDS_LOGIN NodeState = 3
++	// The node is on the tailnet.
++	NodeState_NODE_STATE_RUNNING NodeState = 4
++	// The node stopped on an error it cannot recover from alone.
++	NodeState_NODE_STATE_FAILED NodeState = 5
++)
++
++// Enum value maps for NodeState.
++var (
++	NodeState_name = map[int32]string{
++		0: "NODE_STATE_UNSPECIFIED",
++		1: "NODE_STATE_STOPPED",
++		2: "NODE_STATE_STARTING",
++		3: "NODE_STATE_NEEDS_LOGIN",
++		4: "NODE_STATE_RUNNING",
++		5: "NODE_STATE_FAILED",
++	}
++	NodeState_value = map[string]int32{
++		"NODE_STATE_UNSPECIFIED": 0,
++		"NODE_STATE_STOPPED":     1,
++		"NODE_STATE_STARTING":    2,
++		"NODE_STATE_NEEDS_LOGIN": 3,
++		"NODE_STATE_RUNNING":     4,
++		"NODE_STATE_FAILED":      5,
++	}
++)
++
++func (x NodeState) Enum() *NodeState {
++	p := new(NodeState)
++	*p = x
++	return p
++}
++
++func (x NodeState) String() string {
++	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
++}
++
++func (NodeState) Descriptor() protoreflect.EnumDescriptor {
++	return file_shephrd_tailnet_v1_tailnet_proto_enumTypes[0].Descriptor()
++}
++
++func (NodeState) Type() protoreflect.EnumType {
++	return &file_shephrd_tailnet_v1_tailnet_proto_enumTypes[0]
++}
++
++func (x NodeState) Number() protoreflect.EnumNumber {
++	return protoreflect.EnumNumber(x)
++}
++
++// Deprecated: Use NodeState.Descriptor instead.
++func (NodeState) EnumDescriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{0}
++}
++
++// A signal the package owns.
++type SignalKind int32
++
++const (
++	// Not set.
++	SignalKind_SIGNAL_KIND_UNSPECIFIED SignalKind = 0
++	// SIGTERM.
++	SignalKind_SIGNAL_KIND_TERM SignalKind = 1
++	// SIGINT.
++	SignalKind_SIGNAL_KIND_INT SignalKind = 2
++)
++
++// Enum value maps for SignalKind.
++var (
++	SignalKind_name = map[int32]string{
++		0: "SIGNAL_KIND_UNSPECIFIED",
++		1: "SIGNAL_KIND_TERM",
++		2: "SIGNAL_KIND_INT",
++	}
++	SignalKind_value = map[string]int32{
++		"SIGNAL_KIND_UNSPECIFIED": 0,
++		"SIGNAL_KIND_TERM":        1,
++		"SIGNAL_KIND_INT":         2,
++	}
++)
++
++func (x SignalKind) Enum() *SignalKind {
++	p := new(SignalKind)
++	*p = x
++	return p
++}
++
++func (x SignalKind) String() string {
++	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
++}
++
++func (SignalKind) Descriptor() protoreflect.EnumDescriptor {
++	return file_shephrd_tailnet_v1_tailnet_proto_enumTypes[1].Descriptor()
++}
++
++func (SignalKind) Type() protoreflect.EnumType {
++	return &file_shephrd_tailnet_v1_tailnet_proto_enumTypes[1]
++}
++
++func (x SignalKind) Number() protoreflect.EnumNumber {
++	return protoreflect.EnumNumber(x)
++}
++
++// Deprecated: Use SignalKind.Descriptor instead.
++func (SignalKind) EnumDescriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{1}
++}
++
++// Every message the core sends to the package.
++type Command struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// The command; an arm the package does not know is ignored.
++	//
++	// Types that are valid to be assigned to Body:
++	//
++	//	*Command_Up
++	//	*Command_Down
++	//	*Command_Login
++	//	*Command_Logout
++	//	*Command_Dial
++	//	*Command_ReadStats
++	//	*Command_Taken
++	Body          isCommand_Body `protobuf_oneof:"body"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Command) Reset() {
++	*x = Command{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[0]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Command) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Command) ProtoMessage() {}
++
++func (x *Command) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[0]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Command.ProtoReflect.Descriptor instead.
++func (*Command) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{0}
++}
++
++func (x *Command) GetBody() isCommand_Body {
++	if x != nil {
++		return x.Body
++	}
++	return nil
++}
++
++func (x *Command) GetUp() *Up {
++	if x != nil {
++		if x, ok := x.Body.(*Command_Up); ok {
++			return x.Up
++		}
++	}
++	return nil
++}
++
++func (x *Command) GetDown() *Down {
++	if x != nil {
++		if x, ok := x.Body.(*Command_Down); ok {
++			return x.Down
++		}
++	}
++	return nil
++}
++
++func (x *Command) GetLogin() *Login {
++	if x != nil {
++		if x, ok := x.Body.(*Command_Login); ok {
++			return x.Login
++		}
++	}
++	return nil
++}
++
++func (x *Command) GetLogout() *Logout {
++	if x != nil {
++		if x, ok := x.Body.(*Command_Logout); ok {
++			return x.Logout
++		}
++	}
++	return nil
++}
++
++func (x *Command) GetDial() *Dial {
++	if x != nil {
++		if x, ok := x.Body.(*Command_Dial); ok {
++			return x.Dial
++		}
++	}
++	return nil
++}
++
++func (x *Command) GetReadStats() *ReadStats {
++	if x != nil {
++		if x, ok := x.Body.(*Command_ReadStats); ok {
++			return x.ReadStats
++		}
++	}
++	return nil
++}
++
++func (x *Command) GetTaken() *Taken {
++	if x != nil {
++		if x, ok := x.Body.(*Command_Taken); ok {
++			return x.Taken
++		}
++	}
++	return nil
++}
++
++type isCommand_Body interface {
++	isCommand_Body()
++}
++
++type Command_Up struct {
++	// Starts the node.
++	Up *Up `protobuf:"bytes,1,opt,name=up,proto3,oneof"`
++}
++
++type Command_Down struct {
++	// Stops the node and keeps its state.
++	Down *Down `protobuf:"bytes,2,opt,name=down,proto3,oneof"`
++}
++
++type Command_Login struct {
++	// Asks the control server for a new sign-in link.
++	Login *Login `protobuf:"bytes,3,opt,name=login,proto3,oneof"`
++}
++
++type Command_Logout struct {
++	// Signs the node out and forgets its identity.
++	Logout *Logout `protobuf:"bytes,4,opt,name=logout,proto3,oneof"`
++}
++
++type Command_Dial struct {
++	// Opens a connection to another node.
++	Dial *Dial `protobuf:"bytes,5,opt,name=dial,proto3,oneof"`
++}
++
++type Command_ReadStats struct {
++	// Asks for the package's counts, which a stats event answers.
++	ReadStats *ReadStats `protobuf:"bytes,6,opt,name=read_stats,json=readStats,proto3,oneof"`
++}
++
++type Command_Taken struct {
++	// Says the core holds a handed connection's descriptor.
++	Taken *Taken `protobuf:"bytes,7,opt,name=taken,proto3,oneof"`
++}
++
++func (*Command_Up) isCommand_Body() {}
++
++func (*Command_Down) isCommand_Body() {}
++
++func (*Command_Login) isCommand_Body() {}
++
++func (*Command_Logout) isCommand_Body() {}
++
++func (*Command_Dial) isCommand_Body() {}
++
++func (*Command_ReadStats) isCommand_Body() {}
++
++func (*Command_Taken) isCommand_Body() {}
++
++// Every message the package sends to the core.
++type Event struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// The event; an arm the core does not know is ignored.
++	//
++	// Types that are valid to be assigned to Body:
++	//
++	//	*Event_Hello
++	//	*Event_Ready
++	//	*Event_State
++	//	*Event_Caller
++	//	*Event_Dialed
++	//	*Event_DialFailed
++	//	*Event_PeersChanged
++	//	*Event_Signal
++	//	*Event_Stats
++	Body          isEvent_Body `protobuf_oneof:"body"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Event) Reset() {
++	*x = Event{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[1]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Event) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Event) ProtoMessage() {}
++
++func (x *Event) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[1]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Event.ProtoReflect.Descriptor instead.
++func (*Event) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{1}
++}
++
++func (x *Event) GetBody() isEvent_Body {
++	if x != nil {
++		return x.Body
++	}
++	return nil
++}
++
++func (x *Event) GetHello() *Hello {
++	if x != nil {
++		if x, ok := x.Body.(*Event_Hello); ok {
++			return x.Hello
++		}
++	}
++	return nil
++}
++
++func (x *Event) GetReady() *Ready {
++	if x != nil {
++		if x, ok := x.Body.(*Event_Ready); ok {
++			return x.Ready
++		}
++	}
++	return nil
++}
++
++func (x *Event) GetState() *State {
++	if x != nil {
++		if x, ok := x.Body.(*Event_State); ok {
++			return x.State
++		}
++	}
++	return nil
++}
++
++func (x *Event) GetCaller() *Caller {
++	if x != nil {
++		if x, ok := x.Body.(*Event_Caller); ok {
++			return x.Caller
++		}
++	}
++	return nil
++}
++
++func (x *Event) GetDialed() *Dialed {
++	if x != nil {
++		if x, ok := x.Body.(*Event_Dialed); ok {
++			return x.Dialed
++		}
++	}
++	return nil
++}
++
++func (x *Event) GetDialFailed() *DialFailed {
++	if x != nil {
++		if x, ok := x.Body.(*Event_DialFailed); ok {
++			return x.DialFailed
++		}
++	}
++	return nil
++}
++
++func (x *Event) GetPeersChanged() *PeersChanged {
++	if x != nil {
++		if x, ok := x.Body.(*Event_PeersChanged); ok {
++			return x.PeersChanged
++		}
++	}
++	return nil
++}
++
++func (x *Event) GetSignal() *Signal {
++	if x != nil {
++		if x, ok := x.Body.(*Event_Signal); ok {
++			return x.Signal
++		}
++	}
++	return nil
++}
++
++func (x *Event) GetStats() *Stats {
++	if x != nil {
++		if x, ok := x.Body.(*Event_Stats); ok {
++			return x.Stats
++		}
++	}
++	return nil
++}
++
++type isEvent_Body interface {
++	isEvent_Body()
++}
++
++type Event_Hello struct {
++	// The package's first message.
++	Hello *Hello `protobuf:"bytes,1,opt,name=hello,proto3,oneof"`
++}
++
++type Event_Ready struct {
++	// The node listens on the core's port.
++	Ready *Ready `protobuf:"bytes,2,opt,name=ready,proto3,oneof"`
++}
++
++type Event_State struct {
++	// The node's state after a change.
++	State *State `protobuf:"bytes,3,opt,name=state,proto3,oneof"`
++}
++
++type Event_Caller struct {
++	// A connection arrived; its descriptor travels on the connections socket.
++	Caller *Caller `protobuf:"bytes,4,opt,name=caller,proto3,oneof"`
++}
++
++type Event_Dialed struct {
++	// A dial connected; its descriptor travels on the connections socket.
++	Dialed *Dialed `protobuf:"bytes,5,opt,name=dialed,proto3,oneof"`
++}
++
++type Event_DialFailed struct {
++	// A dial failed.
++	DialFailed *DialFailed `protobuf:"bytes,6,opt,name=dial_failed,json=dialFailed,proto3,oneof"`
++}
++
++type Event_PeersChanged struct {
++	// Peers of the tailnet changed.
++	PeersChanged *PeersChanged `protobuf:"bytes,7,opt,name=peers_changed,json=peersChanged,proto3,oneof"`
++}
++
++type Event_Signal struct {
++	// The process received a signal the package owns.
++	Signal *Signal `protobuf:"bytes,8,opt,name=signal,proto3,oneof"`
++}
++
++type Event_Stats struct {
++	// The package's counts, answering a read stats.
++	Stats *Stats `protobuf:"bytes,9,opt,name=stats,proto3,oneof"`
++}
++
++func (*Event_Hello) isEvent_Body() {}
++
++func (*Event_Ready) isEvent_Body() {}
++
++func (*Event_State) isEvent_Body() {}
++
++func (*Event_Caller) isEvent_Body() {}
++
++func (*Event_Dialed) isEvent_Body() {}
++
++func (*Event_DialFailed) isEvent_Body() {}
++
++func (*Event_PeersChanged) isEvent_Body() {}
++
++func (*Event_Signal) isEvent_Body() {}
++
++func (*Event_Stats) isEvent_Body() {}
++
++// The package's first message on the control socket.
++type Hello struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// The C interface's version, which the core compares with its own.
++	Abi uint32 `protobuf:"varint,1,opt,name=abi,proto3" json:"abi,omitempty"`
++	// The package's build: its source tree hash and Tailscale's version.
++	Build         string `protobuf:"bytes,2,opt,name=build,proto3" json:"build,omitempty"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Hello) Reset() {
++	*x = Hello{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[2]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Hello) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Hello) ProtoMessage() {}
++
++func (x *Hello) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[2]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Hello.ProtoReflect.Descriptor instead.
++func (*Hello) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{2}
++}
++
++func (x *Hello) GetAbi() uint32 {
++	if x != nil {
++		return x.Abi
++	}
++	return 0
++}
++
++func (x *Hello) GetBuild() string {
++	if x != nil {
++		return x.Build
++	}
++	return ""
++}
++
++// Starts the node, signing in with the stored identity, with the auth key, or
++// by the link a NEEDS_LOGIN state carries. On a running node it changes
++// nothing and answers ready again: a new port or hostname takes a down first.
++type Up struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// The directory that holds the node's state, created mode 0700 by the core.
++	StateDir string `protobuf:"bytes,1,opt,name=state_dir,json=stateDir,proto3" json:"state_dir,omitempty"`
++	// The device name.
++	Hostname string `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
++	// A key that signs the node in without a link; the package never stores or
++	// logs it.
++	AuthKey *string `protobuf:"bytes,3,opt,name=auth_key,json=authKey,proto3,oneof" json:"auth_key,omitempty"`
++	// The control server's URL; empty means Tailscale's.
++	ControlUrl string `protobuf:"bytes,4,opt,name=control_url,json=controlUrl,proto3" json:"control_url,omitempty"`
++	// The TCP port the node accepts the core's callers on.
++	Port uint32 `protobuf:"varint,5,opt,name=port,proto3" json:"port,omitempty"`
++	// Sets the node's identity aside first, so it signs in as a new device; a
++	// running node stops first. Without it, a state directory whose node record
++	// outlived its state fails rather than sign in afresh.
++	NewIdentity   bool `protobuf:"varint,6,opt,name=new_identity,json=newIdentity,proto3" json:"new_identity,omitempty"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Up) Reset() {
++	*x = Up{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[3]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Up) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Up) ProtoMessage() {}
++
++func (x *Up) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[3]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Up.ProtoReflect.Descriptor instead.
++func (*Up) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{3}
++}
++
++func (x *Up) GetStateDir() string {
++	if x != nil {
++		return x.StateDir
++	}
++	return ""
++}
++
++func (x *Up) GetHostname() string {
++	if x != nil {
++		return x.Hostname
++	}
++	return ""
++}
++
++func (x *Up) GetAuthKey() string {
++	if x != nil && x.AuthKey != nil {
++		return *x.AuthKey
++	}
++	return ""
++}
++
++func (x *Up) GetControlUrl() string {
++	if x != nil {
++		return x.ControlUrl
++	}
++	return ""
++}
++
++func (x *Up) GetPort() uint32 {
++	if x != nil {
++		return x.Port
++	}
++	return 0
++}
++
++func (x *Up) GetNewIdentity() bool {
++	if x != nil {
++		return x.NewIdentity
++	}
++	return false
++}
++
++// Stops the node; its state stays for the next up.
++type Down struct {
++	state         protoimpl.MessageState `protogen:"open.v1"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Down) Reset() {
++	*x = Down{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[4]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Down) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Down) ProtoMessage() {}
++
++func (x *Down) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[4]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Down.ProtoReflect.Descriptor instead.
++func (*Down) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{4}
++}
++
++// Asks the control server for a new sign-in link, for a node that needs one.
++type Login struct {
++	state         protoimpl.MessageState `protogen:"open.v1"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Login) Reset() {
++	*x = Login{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[5]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Login) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Login) ProtoMessage() {}
++
++func (x *Login) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[5]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Login.ProtoReflect.Descriptor instead.
++func (*Login) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{5}
++}
++
++// Signs the node out at the control server and deletes its state.
++type Logout struct {
++	state         protoimpl.MessageState `protogen:"open.v1"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Logout) Reset() {
++	*x = Logout{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[6]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Logout) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Logout) ProtoMessage() {}
++
++func (x *Logout) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[6]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Logout.ProtoReflect.Descriptor instead.
++func (*Logout) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{6}
++}
++
++// Opens a TCP connection to a node of the tailnet.
++type Dial struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// Chosen by the core, unique among its dials in flight, with the top bit
++	// set, which a caller's id never has, so the two share the connections
++	// socket; the answer and the descriptor carry it. A dial whose id lacks the
++	// bit fails.
++	Id uint64 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
++	// The node's MagicDNS name or tailnet address.
++	Host string `protobuf:"bytes,2,opt,name=host,proto3" json:"host,omitempty"`
++	// The TCP port.
++	Port          uint32 `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Dial) Reset() {
++	*x = Dial{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[7]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Dial) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Dial) ProtoMessage() {}
++
++func (x *Dial) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[7]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Dial.ProtoReflect.Descriptor instead.
++func (*Dial) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{7}
++}
++
++func (x *Dial) GetId() uint64 {
++	if x != nil {
++		return x.Id
++	}
++	return 0
++}
++
++func (x *Dial) GetHost() string {
++	if x != nil {
++		return x.Host
++	}
++	return ""
++}
++
++func (x *Dial) GetPort() uint32 {
++	if x != nil {
++		return x.Port
++	}
++	return 0
++}
++
++// Asks for the package's counts.
++type ReadStats struct {
++	state         protoimpl.MessageState `protogen:"open.v1"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *ReadStats) Reset() {
++	*x = ReadStats{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[8]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *ReadStats) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*ReadStats) ProtoMessage() {}
++
++func (x *ReadStats) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[8]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use ReadStats.ProtoReflect.Descriptor instead.
++func (*ReadStats) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{8}
++}
++
++// The core took connection `id` off the connections socket, with its
++// descriptor or without it, so the package closes its own copy. Until then the
++// package keeps that copy open: on macOS a socket in flight can break when its
++// sender closes the last other copy before the receiver reads it.
++type Taken struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// The connection's id, a caller's or a dial's.
++	Id            uint64 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Taken) Reset() {
++	*x = Taken{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[9]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Taken) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Taken) ProtoMessage() {}
++
++func (x *Taken) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[9]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Taken.ProtoReflect.Descriptor instead.
++func (*Taken) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{9}
++}
++
++func (x *Taken) GetId() uint64 {
++	if x != nil {
++		return x.Id
++	}
++	return 0
++}
++
++// The node listens on the port the last up named.
++type Ready struct {
++	state         protoimpl.MessageState `protogen:"open.v1"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Ready) Reset() {
++	*x = Ready{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[10]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Ready) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Ready) ProtoMessage() {}
++
++func (x *Ready) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[10]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Ready.ProtoReflect.Descriptor instead.
++func (*Ready) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{10}
++}
++
++// The node's state after a change.
++type State struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// The state.
++	State NodeState `protobuf:"varint,1,opt,name=state,proto3,enum=shephrd.tailnet.v1.NodeState" json:"state,omitempty"`
++	// The sign-in link, while the state is NEEDS_LOGIN.
++	LoginUrl string `protobuf:"bytes,2,opt,name=login_url,json=loginUrl,proto3" json:"login_url,omitempty"`
++	// The node's MagicDNS name, once the control server has named it.
++	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
++	// The node's tailnet addresses, while it runs.
++	Addresses []string `protobuf:"bytes,4,rep,name=addresses,proto3" json:"addresses,omitempty"`
++	// Why the state is FAILED, or a health warning in another state.
++	Error         string `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *State) Reset() {
++	*x = State{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[11]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *State) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*State) ProtoMessage() {}
++
++func (x *State) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[11]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use State.ProtoReflect.Descriptor instead.
++func (*State) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{11}
++}
++
++func (x *State) GetState() NodeState {
++	if x != nil {
++		return x.State
++	}
++	return NodeState_NODE_STATE_UNSPECIFIED
++}
++
++func (x *State) GetLoginUrl() string {
++	if x != nil {
++		return x.LoginUrl
++	}
++	return ""
++}
++
++func (x *State) GetName() string {
++	if x != nil {
++		return x.Name
++	}
++	return ""
++}
++
++func (x *State) GetAddresses() []string {
++	if x != nil {
++		return x.Addresses
++	}
++	return nil
++}
++
++func (x *State) GetError() string {
++	if x != nil {
++		return x.Error
++	}
++	return ""
++}
++
++// Who a connection came from, as WhoIs reports it.
++type Caller struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// The connection's id, which its descriptor carries on the connections
++	// socket. It never has the top bit set, which marks a dial's id.
++	Id uint64 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
++	// The caller's identity.
++	Peer          *Peer `protobuf:"bytes,2,opt,name=peer,proto3" json:"peer,omitempty"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Caller) Reset() {
++	*x = Caller{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[12]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Caller) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Caller) ProtoMessage() {}
++
++func (x *Caller) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[12]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Caller.ProtoReflect.Descriptor instead.
++func (*Caller) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{12}
++}
++
++func (x *Caller) GetId() uint64 {
++	if x != nil {
++		return x.Id
++	}
++	return 0
++}
++
++func (x *Caller) GetPeer() *Peer {
++	if x != nil {
++		return x.Peer
++	}
++	return nil
++}
++
++// A node of the tailnet and the user who owns it.
++type Peer struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// The node's stable id.
++	StableId string `protobuf:"bytes,1,opt,name=stable_id,json=stableId,proto3" json:"stable_id,omitempty"`
++	// The node's MagicDNS name.
++	NodeName string `protobuf:"bytes,2,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
++	// The owning user's id; for a tagged node, the id Tailscale gives tagged
++	// devices.
++	UserId uint64 `protobuf:"varint,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
++	// The owning user's login name.
++	LoginName string `protobuf:"bytes,4,opt,name=login_name,json=loginName,proto3" json:"login_name,omitempty"`
++	// The node's ACL tags; empty for a user-owned node.
++	Tags []string `protobuf:"bytes,5,rep,name=tags,proto3" json:"tags,omitempty"`
++	// The node is shared in from another tailnet.
++	Shared bool `protobuf:"varint,6,opt,name=shared,proto3" json:"shared,omitempty"`
++	// In a peers-changed event: the node left the tailnet.
++	Removed       bool `protobuf:"varint,7,opt,name=removed,proto3" json:"removed,omitempty"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Peer) Reset() {
++	*x = Peer{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[13]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Peer) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Peer) ProtoMessage() {}
++
++func (x *Peer) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[13]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Peer.ProtoReflect.Descriptor instead.
++func (*Peer) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{13}
++}
++
++func (x *Peer) GetStableId() string {
++	if x != nil {
++		return x.StableId
++	}
++	return ""
++}
++
++func (x *Peer) GetNodeName() string {
++	if x != nil {
++		return x.NodeName
++	}
++	return ""
++}
++
++func (x *Peer) GetUserId() uint64 {
++	if x != nil {
++		return x.UserId
++	}
++	return 0
++}
++
++func (x *Peer) GetLoginName() string {
++	if x != nil {
++		return x.LoginName
++	}
++	return ""
++}
++
++func (x *Peer) GetTags() []string {
++	if x != nil {
++		return x.Tags
++	}
++	return nil
++}
++
++func (x *Peer) GetShared() bool {
++	if x != nil {
++		return x.Shared
++	}
++	return false
++}
++
++func (x *Peer) GetRemoved() bool {
++	if x != nil {
++		return x.Removed
++	}
++	return false
++}
++
++// A dial connected.
++type Dialed struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// The dial's id, which the descriptor carries on the connections socket.
++	Id uint64 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
++	// The remote node's tailnet address the connection reached.
++	Address       string `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Dialed) Reset() {
++	*x = Dialed{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[14]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Dialed) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Dialed) ProtoMessage() {}
++
++func (x *Dialed) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[14]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Dialed.ProtoReflect.Descriptor instead.
++func (*Dialed) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{14}
++}
++
++func (x *Dialed) GetId() uint64 {
++	if x != nil {
++		return x.Id
++	}
++	return 0
++}
++
++func (x *Dialed) GetAddress() string {
++	if x != nil {
++		return x.Address
++	}
++	return ""
++}
++
++// A dial failed.
++type DialFailed struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// The dial's id.
++	Id uint64 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
++	// Why.
++	Error         string `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *DialFailed) Reset() {
++	*x = DialFailed{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[15]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *DialFailed) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*DialFailed) ProtoMessage() {}
++
++func (x *DialFailed) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[15]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use DialFailed.ProtoReflect.Descriptor instead.
++func (*DialFailed) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{15}
++}
++
++func (x *DialFailed) GetId() uint64 {
++	if x != nil {
++		return x.Id
++	}
++	return 0
++}
++
++func (x *DialFailed) GetError() string {
++	if x != nil {
++		return x.Error
++	}
++	return ""
++}
++
++// Peers of the tailnet changed: each one that changed or left.
++type PeersChanged struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// The peers, as they are now.
++	Peers         []*Peer `protobuf:"bytes,1,rep,name=peers,proto3" json:"peers,omitempty"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *PeersChanged) Reset() {
++	*x = PeersChanged{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[16]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *PeersChanged) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*PeersChanged) ProtoMessage() {}
++
++func (x *PeersChanged) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[16]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use PeersChanged.ProtoReflect.Descriptor instead.
++func (*PeersChanged) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{16}
++}
++
++func (x *PeersChanged) GetPeers() []*Peer {
++	if x != nil {
++		return x.Peers
++	}
++	return nil
++}
++
++// The process received a signal; the core shuts down as it would on Stop.
++type Signal struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// Which signal.
++	Kind          SignalKind `protobuf:"varint,1,opt,name=kind,proto3,enum=shephrd.tailnet.v1.SignalKind" json:"kind,omitempty"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Signal) Reset() {
++	*x = Signal{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[17]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Signal) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Signal) ProtoMessage() {}
++
++func (x *Signal) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[17]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Signal.ProtoReflect.Descriptor instead.
++func (*Signal) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{17}
++}
++
++func (x *Signal) GetKind() SignalKind {
++	if x != nil {
++		return x.Kind
++	}
++	return SignalKind_SIGNAL_KIND_UNSPECIFIED
++}
++
++// The node record the package keeps as node.pb in the state directory, mode
++// 0600, once the node has run. It says the directory held a signed-in node,
++// so a state that went missing fails the next up rather than sign in afresh;
++// the core never reads it.
++type NodeRecord struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// The node's stable id.
++	StableId string `protobuf:"bytes,1,opt,name=stable_id,json=stableId,proto3" json:"stable_id,omitempty"`
++	// The node's MagicDNS name.
++	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
++	// The Tailscale version that last ran the node; a state from a newer one is
++	// refused, as tsnet has no downgrade path.
++	TailscaleVersion string `protobuf:"bytes,3,opt,name=tailscale_version,json=tailscaleVersion,proto3" json:"tailscale_version,omitempty"`
++	unknownFields    protoimpl.UnknownFields
++	sizeCache        protoimpl.SizeCache
++}
++
++func (x *NodeRecord) Reset() {
++	*x = NodeRecord{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[18]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *NodeRecord) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*NodeRecord) ProtoMessage() {}
++
++func (x *NodeRecord) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[18]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use NodeRecord.ProtoReflect.Descriptor instead.
++func (*NodeRecord) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{18}
++}
++
++func (x *NodeRecord) GetStableId() string {
++	if x != nil {
++		return x.StableId
++	}
++	return ""
++}
++
++func (x *NodeRecord) GetName() string {
++	if x != nil {
++		return x.Name
++	}
++	return ""
++}
++
++func (x *NodeRecord) GetTailscaleVersion() string {
++	if x != nil {
++		return x.TailscaleVersion
++	}
++	return ""
++}
++
++// The package's counts, for a core to log and its tests to bound.
++type Stats struct {
++	state protoimpl.MessageState `protogen:"open.v1"`
++	// The process's goroutines, Go's runtime.NumGoroutine.
++	Goroutines uint32 `protobuf:"varint,1,opt,name=goroutines,proto3" json:"goroutines,omitempty"`
++	// The connections the package carries for the core: accepted and dialed,
++	// until both their directions end.
++	Connections   uint32 `protobuf:"varint,2,opt,name=connections,proto3" json:"connections,omitempty"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Stats) Reset() {
++	*x = Stats{}
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[19]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Stats) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Stats) ProtoMessage() {}
++
++func (x *Stats) ProtoReflect() protoreflect.Message {
++	mi := &file_shephrd_tailnet_v1_tailnet_proto_msgTypes[19]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Stats.ProtoReflect.Descriptor instead.
++func (*Stats) Descriptor() ([]byte, []int) {
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP(), []int{19}
++}
++
++func (x *Stats) GetGoroutines() uint32 {
++	if x != nil {
++		return x.Goroutines
++	}
++	return 0
++}
++
++func (x *Stats) GetConnections() uint32 {
++	if x != nil {
++		return x.Connections
++	}
++	return 0
++}
++
++var File_shephrd_tailnet_v1_tailnet_proto protoreflect.FileDescriptor
++
++const file_shephrd_tailnet_v1_tailnet_proto_rawDesc = "" +
++	"\n" +
++	" shephrd/tailnet/v1/tailnet.proto\x12\x12shephrd.tailnet.v1\"\xf7\x02\n" +
++	"\aCommand\x12(\n" +
++	"\x02up\x18\x01 \x01(\v2\x16.shephrd.tailnet.v1.UpH\x00R\x02up\x12.\n" +
++	"\x04down\x18\x02 \x01(\v2\x18.shephrd.tailnet.v1.DownH\x00R\x04down\x121\n" +
++	"\x05login\x18\x03 \x01(\v2\x19.shephrd.tailnet.v1.LoginH\x00R\x05login\x124\n" +
++	"\x06logout\x18\x04 \x01(\v2\x1a.shephrd.tailnet.v1.LogoutH\x00R\x06logout\x12.\n" +
++	"\x04dial\x18\x05 \x01(\v2\x18.shephrd.tailnet.v1.DialH\x00R\x04dial\x12>\n" +
++	"\n" +
++	"read_stats\x18\x06 \x01(\v2\x1d.shephrd.tailnet.v1.ReadStatsH\x00R\treadStats\x121\n" +
++	"\x05taken\x18\a \x01(\v2\x19.shephrd.tailnet.v1.TakenH\x00R\x05takenB\x06\n" +
++	"\x04body\"\x89\x04\n" +
++	"\x05Event\x121\n" +
++	"\x05hello\x18\x01 \x01(\v2\x19.shephrd.tailnet.v1.HelloH\x00R\x05hello\x121\n" +
++	"\x05ready\x18\x02 \x01(\v2\x19.shephrd.tailnet.v1.ReadyH\x00R\x05ready\x121\n" +
++	"\x05state\x18\x03 \x01(\v2\x19.shephrd.tailnet.v1.StateH\x00R\x05state\x124\n" +
++	"\x06caller\x18\x04 \x01(\v2\x1a.shephrd.tailnet.v1.CallerH\x00R\x06caller\x124\n" +
++	"\x06dialed\x18\x05 \x01(\v2\x1a.shephrd.tailnet.v1.DialedH\x00R\x06dialed\x12A\n" +
++	"\vdial_failed\x18\x06 \x01(\v2\x1e.shephrd.tailnet.v1.DialFailedH\x00R\n" +
++	"dialFailed\x12G\n" +
++	"\rpeers_changed\x18\a \x01(\v2 .shephrd.tailnet.v1.PeersChangedH\x00R\fpeersChanged\x124\n" +
++	"\x06signal\x18\b \x01(\v2\x1a.shephrd.tailnet.v1.SignalH\x00R\x06signal\x121\n" +
++	"\x05stats\x18\t \x01(\v2\x19.shephrd.tailnet.v1.StatsH\x00R\x05statsB\x06\n" +
++	"\x04body\"/\n" +
++	"\x05Hello\x12\x10\n" +
++	"\x03abi\x18\x01 \x01(\rR\x03abi\x12\x14\n" +
++	"\x05build\x18\x02 \x01(\tR\x05build\"\xc2\x01\n" +
++	"\x02Up\x12\x1b\n" +
++	"\tstate_dir\x18\x01 \x01(\tR\bstateDir\x12\x1a\n" +
++	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x1e\n" +
++	"\bauth_key\x18\x03 \x01(\tH\x00R\aauthKey\x88\x01\x01\x12\x1f\n" +
++	"\vcontrol_url\x18\x04 \x01(\tR\n" +
++	"controlUrl\x12\x12\n" +
++	"\x04port\x18\x05 \x01(\rR\x04port\x12!\n" +
++	"\fnew_identity\x18\x06 \x01(\bR\vnewIdentityB\v\n" +
++	"\t_auth_key\"\x06\n" +
++	"\x04Down\"\a\n" +
++	"\x05Login\"\b\n" +
++	"\x06Logout\">\n" +
++	"\x04Dial\x12\x0e\n" +
++	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
++	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
++	"\x04port\x18\x03 \x01(\rR\x04port\"\v\n" +
++	"\tReadStats\"\x17\n" +
++	"\x05Taken\x12\x0e\n" +
++	"\x02id\x18\x01 \x01(\x04R\x02id\"\a\n" +
++	"\x05Ready\"\xa1\x01\n" +
++	"\x05State\x123\n" +
++	"\x05state\x18\x01 \x01(\x0e2\x1d.shephrd.tailnet.v1.NodeStateR\x05state\x12\x1b\n" +
++	"\tlogin_url\x18\x02 \x01(\tR\bloginUrl\x12\x12\n" +
++	"\x04name\x18\x03 \x01(\tR\x04name\x12\x1c\n" +
++	"\taddresses\x18\x04 \x03(\tR\taddresses\x12\x14\n" +
++	"\x05error\x18\x05 \x01(\tR\x05error\"F\n" +
++	"\x06Caller\x12\x0e\n" +
++	"\x02id\x18\x01 \x01(\x04R\x02id\x12,\n" +
++	"\x04peer\x18\x02 \x01(\v2\x18.shephrd.tailnet.v1.PeerR\x04peer\"\xbe\x01\n" +
++	"\x04Peer\x12\x1b\n" +
++	"\tstable_id\x18\x01 \x01(\tR\bstableId\x12\x1b\n" +
++	"\tnode_name\x18\x02 \x01(\tR\bnodeName\x12\x17\n" +
++	"\auser_id\x18\x03 \x01(\x04R\x06userId\x12\x1d\n" +
++	"\n" +
++	"login_name\x18\x04 \x01(\tR\tloginName\x12\x12\n" +
++	"\x04tags\x18\x05 \x03(\tR\x04tags\x12\x16\n" +
++	"\x06shared\x18\x06 \x01(\bR\x06shared\x12\x18\n" +
++	"\aremoved\x18\a \x01(\bR\aremoved\"2\n" +
++	"\x06Dialed\x12\x0e\n" +
++	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x18\n" +
++	"\aaddress\x18\x02 \x01(\tR\aaddress\"2\n" +
++	"\n" +
++	"DialFailed\x12\x0e\n" +
++	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x14\n" +
++	"\x05error\x18\x02 \x01(\tR\x05error\">\n" +
++	"\fPeersChanged\x12.\n" +
++	"\x05peers\x18\x01 \x03(\v2\x18.shephrd.tailnet.v1.PeerR\x05peers\"<\n" +
++	"\x06Signal\x122\n" +
++	"\x04kind\x18\x01 \x01(\x0e2\x1e.shephrd.tailnet.v1.SignalKindR\x04kind\"j\n" +
++	"\n" +
++	"NodeRecord\x12\x1b\n" +
++	"\tstable_id\x18\x01 \x01(\tR\bstableId\x12\x12\n" +
++	"\x04name\x18\x02 \x01(\tR\x04name\x12+\n" +
++	"\x11tailscale_version\x18\x03 \x01(\tR\x10tailscaleVersion\"I\n" +
++	"\x05Stats\x12\x1e\n" +
++	"\n" +
++	"goroutines\x18\x01 \x01(\rR\n" +
++	"goroutines\x12 \n" +
++	"\vconnections\x18\x02 \x01(\rR\vconnections*\xa3\x01\n" +
++	"\tNodeState\x12\x1a\n" +
++	"\x16NODE_STATE_UNSPECIFIED\x10\x00\x12\x16\n" +
++	"\x12NODE_STATE_STOPPED\x10\x01\x12\x17\n" +
++	"\x13NODE_STATE_STARTING\x10\x02\x12\x1a\n" +
++	"\x16NODE_STATE_NEEDS_LOGIN\x10\x03\x12\x16\n" +
++	"\x12NODE_STATE_RUNNING\x10\x04\x12\x15\n" +
++	"\x11NODE_STATE_FAILED\x10\x05*T\n" +
++	"\n" +
++	"SignalKind\x12\x1b\n" +
++	"\x17SIGNAL_KIND_UNSPECIFIED\x10\x00\x12\x14\n" +
++	"\x10SIGNAL_KIND_TERM\x10\x01\x12\x13\n" +
++	"\x0fSIGNAL_KIND_INT\x10\x02B)Z'tailscale.com/shephrd/tailnet/tailnetpbb\x06proto3"
++
++var (
++	file_shephrd_tailnet_v1_tailnet_proto_rawDescOnce sync.Once
++	file_shephrd_tailnet_v1_tailnet_proto_rawDescData []byte
++)
++
++func file_shephrd_tailnet_v1_tailnet_proto_rawDescGZIP() []byte {
++	file_shephrd_tailnet_v1_tailnet_proto_rawDescOnce.Do(func() {
++		file_shephrd_tailnet_v1_tailnet_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_shephrd_tailnet_v1_tailnet_proto_rawDesc), len(file_shephrd_tailnet_v1_tailnet_proto_rawDesc)))
++	})
++	return file_shephrd_tailnet_v1_tailnet_proto_rawDescData
++}
++
++var file_shephrd_tailnet_v1_tailnet_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
++var file_shephrd_tailnet_v1_tailnet_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
++var file_shephrd_tailnet_v1_tailnet_proto_goTypes = []any{
++	(NodeState)(0),       // 0: shephrd.tailnet.v1.NodeState
++	(SignalKind)(0),      // 1: shephrd.tailnet.v1.SignalKind
++	(*Command)(nil),      // 2: shephrd.tailnet.v1.Command
++	(*Event)(nil),        // 3: shephrd.tailnet.v1.Event
++	(*Hello)(nil),        // 4: shephrd.tailnet.v1.Hello
++	(*Up)(nil),           // 5: shephrd.tailnet.v1.Up
++	(*Down)(nil),         // 6: shephrd.tailnet.v1.Down
++	(*Login)(nil),        // 7: shephrd.tailnet.v1.Login
++	(*Logout)(nil),       // 8: shephrd.tailnet.v1.Logout
++	(*Dial)(nil),         // 9: shephrd.tailnet.v1.Dial
++	(*ReadStats)(nil),    // 10: shephrd.tailnet.v1.ReadStats
++	(*Taken)(nil),        // 11: shephrd.tailnet.v1.Taken
++	(*Ready)(nil),        // 12: shephrd.tailnet.v1.Ready
++	(*State)(nil),        // 13: shephrd.tailnet.v1.State
++	(*Caller)(nil),       // 14: shephrd.tailnet.v1.Caller
++	(*Peer)(nil),         // 15: shephrd.tailnet.v1.Peer
++	(*Dialed)(nil),       // 16: shephrd.tailnet.v1.Dialed
++	(*DialFailed)(nil),   // 17: shephrd.tailnet.v1.DialFailed
++	(*PeersChanged)(nil), // 18: shephrd.tailnet.v1.PeersChanged
++	(*Signal)(nil),       // 19: shephrd.tailnet.v1.Signal
++	(*NodeRecord)(nil),   // 20: shephrd.tailnet.v1.NodeRecord
++	(*Stats)(nil),        // 21: shephrd.tailnet.v1.Stats
++}
++var file_shephrd_tailnet_v1_tailnet_proto_depIdxs = []int32{
++	5,  // 0: shephrd.tailnet.v1.Command.up:type_name -> shephrd.tailnet.v1.Up
++	6,  // 1: shephrd.tailnet.v1.Command.down:type_name -> shephrd.tailnet.v1.Down
++	7,  // 2: shephrd.tailnet.v1.Command.login:type_name -> shephrd.tailnet.v1.Login
++	8,  // 3: shephrd.tailnet.v1.Command.logout:type_name -> shephrd.tailnet.v1.Logout
++	9,  // 4: shephrd.tailnet.v1.Command.dial:type_name -> shephrd.tailnet.v1.Dial
++	10, // 5: shephrd.tailnet.v1.Command.read_stats:type_name -> shephrd.tailnet.v1.ReadStats
++	11, // 6: shephrd.tailnet.v1.Command.taken:type_name -> shephrd.tailnet.v1.Taken
++	4,  // 7: shephrd.tailnet.v1.Event.hello:type_name -> shephrd.tailnet.v1.Hello
++	12, // 8: shephrd.tailnet.v1.Event.ready:type_name -> shephrd.tailnet.v1.Ready
++	13, // 9: shephrd.tailnet.v1.Event.state:type_name -> shephrd.tailnet.v1.State
++	14, // 10: shephrd.tailnet.v1.Event.caller:type_name -> shephrd.tailnet.v1.Caller
++	16, // 11: shephrd.tailnet.v1.Event.dialed:type_name -> shephrd.tailnet.v1.Dialed
++	17, // 12: shephrd.tailnet.v1.Event.dial_failed:type_name -> shephrd.tailnet.v1.DialFailed
++	18, // 13: shephrd.tailnet.v1.Event.peers_changed:type_name -> shephrd.tailnet.v1.PeersChanged
++	19, // 14: shephrd.tailnet.v1.Event.signal:type_name -> shephrd.tailnet.v1.Signal
++	21, // 15: shephrd.tailnet.v1.Event.stats:type_name -> shephrd.tailnet.v1.Stats
++	0,  // 16: shephrd.tailnet.v1.State.state:type_name -> shephrd.tailnet.v1.NodeState
++	15, // 17: shephrd.tailnet.v1.Caller.peer:type_name -> shephrd.tailnet.v1.Peer
++	15, // 18: shephrd.tailnet.v1.PeersChanged.peers:type_name -> shephrd.tailnet.v1.Peer
++	1,  // 19: shephrd.tailnet.v1.Signal.kind:type_name -> shephrd.tailnet.v1.SignalKind
++	20, // [20:20] is the sub-list for method output_type
++	20, // [20:20] is the sub-list for method input_type
++	20, // [20:20] is the sub-list for extension type_name
++	20, // [20:20] is the sub-list for extension extendee
++	0,  // [0:20] is the sub-list for field type_name
++}
++
++func init() { file_shephrd_tailnet_v1_tailnet_proto_init() }
++func file_shephrd_tailnet_v1_tailnet_proto_init() {
++	if File_shephrd_tailnet_v1_tailnet_proto != nil {
++		return
++	}
++	file_shephrd_tailnet_v1_tailnet_proto_msgTypes[0].OneofWrappers = []any{
++		(*Command_Up)(nil),
++		(*Command_Down)(nil),
++		(*Command_Login)(nil),
++		(*Command_Logout)(nil),
++		(*Command_Dial)(nil),
++		(*Command_ReadStats)(nil),
++		(*Command_Taken)(nil),
++	}
++	file_shephrd_tailnet_v1_tailnet_proto_msgTypes[1].OneofWrappers = []any{
++		(*Event_Hello)(nil),
++		(*Event_Ready)(nil),
++		(*Event_State)(nil),
++		(*Event_Caller)(nil),
++		(*Event_Dialed)(nil),
++		(*Event_DialFailed)(nil),
++		(*Event_PeersChanged)(nil),
++		(*Event_Signal)(nil),
++		(*Event_Stats)(nil),
++	}
++	file_shephrd_tailnet_v1_tailnet_proto_msgTypes[3].OneofWrappers = []any{}
++	type x struct{}
++	out := protoimpl.TypeBuilder{
++		File: protoimpl.DescBuilder{
++			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
++			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shephrd_tailnet_v1_tailnet_proto_rawDesc), len(file_shephrd_tailnet_v1_tailnet_proto_rawDesc)),
++			NumEnums:      2,
++			NumMessages:   20,
++			NumExtensions: 0,
++			NumServices:   0,
++		},
++		GoTypes:           file_shephrd_tailnet_v1_tailnet_proto_goTypes,
++		DependencyIndexes: file_shephrd_tailnet_v1_tailnet_proto_depIdxs,
++		EnumInfos:         file_shephrd_tailnet_v1_tailnet_proto_enumTypes,
++		MessageInfos:      file_shephrd_tailnet_v1_tailnet_proto_msgTypes,
++	}.Build()
++	File_shephrd_tailnet_v1_tailnet_proto = out.File
++	file_shephrd_tailnet_v1_tailnet_proto_goTypes = nil
++	file_shephrd_tailnet_v1_tailnet_proto_depIdxs = nil
++}
+diff --git a/shephrd/testcontrol/main.go b/shephrd/testcontrol/main.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..6f3790caa4eb4b781674946e506f96bf5f0ca3ed
+--- /dev/null
++++ b/shephrd/testcontrol/main.go
+@@ -0,0 +1,219 @@
++// Program testcontrol runs Tailscale's test control server, with its DERP and
++// STUN servers, for shephrd's tailnet tests, and lets a test in another
++// process drive it through an admin API on loopback: complete a sign-in, tag
++// a node, expire a node's key, or order a node to exit.
++//
++// It is a test tool. The libshephrdtailnet release ships it as
++// bin/testcontrol for the tests; nothing shephrd ships to users holds it.
++package main
++
++import (
++	"encoding/json"
++	"errors"
++	"flag"
++	"fmt"
++	"log"
++	"net"
++	"net/http"
++	"net/netip"
++	"strconv"
++	"testing"
++	"time"
++
++	"tailscale.com/tailcfg"
++	"tailscale.com/tstest/integration"
++	"tailscale.com/tstest/integration/testcontrol"
++	"tailscale.com/types/logger"
++)
++
++var (
++	flagAddr        = flag.String("addr", "127.0.0.1:9911", "IP:port the control server listens on, port 0 for any free one; the DERP and STUN servers also run on that IP")
++	flagAdminAddr   = flag.String("admin-addr", "", "loopback IP:port of the admin API, port 0 for any free one; none when empty")
++	flagRequireAuth = flag.Bool("require-auth", false, "make a node without a valid auth key wait for a sign-in, which POST /login completes")
++	flagAuthKey     = flag.String("auth-key", "", "the auth key every node must present; any key when empty")
++)
++
++// main listens first, then prints each address it listens on to standard
++// output, "control http://<addr>" and "admin <addr>", so a test that asked
++// for port 0 learns them without a race for a free port.
++func main() {
++	flag.Parse()
++	listener, err := net.Listen("tcp", *flagAddr)
++	if err != nil {
++		log.Fatalf("listen on --addr %q: %v", *flagAddr, err)
++	}
++	addr := listener.Addr().String()
++	host, _, err := net.SplitHostPort(addr)
++	if err != nil {
++		log.Fatalf("invalid --addr %q: %v", *flagAddr, err)
++	}
++	control := &testcontrol.Server{
++		DERPMap:         integration.RunDERPAndSTUN(tb{}, logger.Discard, host),
++		ExplicitBaseURL: "http://" + addr,
++		RequireAuth:     *flagRequireAuth,
++		RequireAuthKey:  *flagAuthKey,
++	}
++	fmt.Printf("control http://%s\n", addr)
++	if *flagAdminAddr != "" {
++		if err := loopback(*flagAdminAddr); err != nil {
++			log.Fatalf("invalid --admin-addr: %v", err)
++		}
++		adminListener, err := net.Listen("tcp", *flagAdminAddr)
++		if err != nil {
++			log.Fatalf("listen on --admin-addr %q: %v", *flagAdminAddr, err)
++		}
++		fmt.Printf("admin %s\n", adminListener.Addr())
++		go func() {
++			log.Fatal(http.Serve(adminListener, admin(control)))
++		}()
++	}
++	log.Fatal(http.Serve(listener, control))
++}
++
++// loopback refuses an address that is not a loopback IP and port, so the
++// admin API is never reachable from another host.
++func loopback(addr string) error {
++	host, _, err := net.SplitHostPort(addr)
++	if err != nil {
++		return err
++	}
++	ip, err := netip.ParseAddr(host)
++	if err != nil {
++		return fmt.Errorf("%q is not an IP address: %w", host, err)
++	}
++	if !ip.IsLoopback() {
++		return fmt.Errorf("%s is not a loopback address", ip)
++	}
++	return nil
++}
++
++// node is one node as GET /nodes lists it.
++type node struct {
++	Name   string   `json:"name"`
++	UserID int64    `json:"user_id"`
++	Tags   []string `json:"tags"`
++	// Sharer is the user who shared the node in from another tailnet, or 0.
++	Sharer int64 `json:"sharer"`
++}
++
++// admin serves the admin API:
++//
++//	GET  /nodes                       the nodes, as JSON
++//	POST /login?url=<sign-in link>    completes the sign-in the link names
++//	POST /tags?name=<host>&tag=<tag>  sets the node's tags, the tag parameter repeated
++//	POST /share?name=<host>&sharer=<user id>  marks the node as shared in by that user, or not when it is 0
++//	POST /expire?name=<host>&expired=true|false  expires the node's key, or clears its expiry
++//	POST /debug-exit?name=<host>&code=<n>  sends the node a map response with Debug.Exit
++func admin(control *testcontrol.Server) http.Handler {
++	mux := http.NewServeMux()
++	mux.HandleFunc("GET /nodes", func(w http.ResponseWriter, r *http.Request) {
++		nodes := []node{}
++		for _, n := range control.AllNodes() {
++			nodes = append(nodes, node{
++				Name:   n.Hostinfo.Hostname(),
++				UserID: int64(n.User),
++				Tags:   n.Tags,
++				Sharer: int64(n.Sharer),
++			})
++		}
++		w.Header().Set("Content-Type", "application/json")
++		json.NewEncoder(w).Encode(nodes)
++	})
++	mux.HandleFunc("POST /login", func(w http.ResponseWriter, r *http.Request) {
++		if !control.CompleteAuth(r.URL.Query().Get("url")) {
++			http.Error(w, "no sign-in waits on that link", http.StatusNotFound)
++		}
++	})
++	mux.HandleFunc("POST /tags", func(w http.ResponseWriter, r *http.Request) {
++		n, err := byName(control, r.URL.Query().Get("name"))
++		if err != nil {
++			http.Error(w, err.Error(), http.StatusNotFound)
++			return
++		}
++		n.Tags = r.URL.Query()["tag"]
++		control.UpdateNode(n)
++	})
++	mux.HandleFunc("POST /share", func(w http.ResponseWriter, r *http.Request) {
++		sharer, err := strconv.ParseInt(r.URL.Query().Get("sharer"), 10, 64)
++		if err != nil {
++			http.Error(w, "sharer must be a user id", http.StatusBadRequest)
++			return
++		}
++		n, err := byName(control, r.URL.Query().Get("name"))
++		if err != nil {
++			http.Error(w, err.Error(), http.StatusNotFound)
++			return
++		}
++		// Every peer's map carries the stored node, so WhoIs on the others
++		// names the sharer as the real control server's would.
++		n.Sharer = tailcfg.UserID(sharer)
++		control.UpdateNode(n)
++	})
++	mux.HandleFunc("POST /expire", func(w http.ResponseWriter, r *http.Request) {
++		expired, err := strconv.ParseBool(r.URL.Query().Get("expired"))
++		if err != nil {
++			http.Error(w, "expired must be true or false", http.StatusBadRequest)
++			return
++		}
++		// Every entry of the name: a key rotation keeps the old key's entry
++		// beside the new one until the sign-in completes. As a real control
++		// server does, the key expires; a test clears the expiry before it
++		// completes the sign-in that replaces it.
++		name := r.URL.Query().Get("name")
++		found := false
++		for _, n := range control.AllNodes() {
++			if n.Hostinfo.Hostname() != name {
++				continue
++			}
++			found = true
++			n.KeyExpiry = time.Time{}
++			if expired {
++				n.KeyExpiry = time.Now().Add(-time.Minute)
++			}
++			control.UpdateNode(n)
++		}
++		if !found {
++			http.Error(w, "no node has that name", http.StatusNotFound)
++		}
++	})
++	mux.HandleFunc("POST /debug-exit", func(w http.ResponseWriter, r *http.Request) {
++		code, err := strconv.Atoi(r.URL.Query().Get("code"))
++		if err != nil {
++			http.Error(w, "code must be an integer", http.StatusBadRequest)
++			return
++		}
++		n, err := byName(control, r.URL.Query().Get("name"))
++		if err != nil {
++			http.Error(w, err.Error(), http.StatusNotFound)
++			return
++		}
++		if !control.AddRawMapResponse(n.Key, &tailcfg.MapResponse{Debug: &tailcfg.Debug{Exit: &code}}) {
++			http.Error(w, "the node is not polling", http.StatusConflict)
++		}
++	})
++	return mux
++}
++
++// byName finds the node whose host name is name.
++func byName(control *testcontrol.Server, name string) (*tailcfg.Node, error) {
++	for _, n := range control.AllNodes() {
++		if n.Hostinfo.Hostname() == name {
++			return n, nil
++		}
++	}
++	return nil, errors.New("no node has that name")
++}
++
++// tb is the testing.TB RunDERPAndSTUN takes, for a server that runs outside a
++// test: a failure ends the process.
++type tb struct {
++	testing.TB
++}
++
++func (tb) Helper()                           {}
++func (tb) Cleanup(func())                    {}
++func (tb) Logf(format string, args ...any)   { log.Printf(format, args...) }
++func (tb) Fatalf(format string, args ...any) { log.Fatalf(format, args...) }
++func (tb) Fatal(args ...any)                 { log.Fatal(args...) }
++func (tb) Errorf(format string, args ...any) { log.Fatalf(format, args...) }
++func (tb) Error(args ...any)                 { log.Fatal(args...) }
+diff --git a/shephrd/testcontrol/main_test.go b/shephrd/testcontrol/main_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..23b4dd53a36da9daf5bf95f76536eeec8ce14d7a
+--- /dev/null
++++ b/shephrd/testcontrol/main_test.go
+@@ -0,0 +1,56 @@
++package main
++
++import (
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++
++	"tailscale.com/tstest/integration/testcontrol"
++)
++
++func TestTheAdminAPIBindsOnlyToLoopback(t *testing.T) {
++	for addr, ok := range map[string]bool{
++		"127.0.0.1:9912": true,
++		"[::1]:9912":     true,
++		"0.0.0.0:9912":   false,
++		"192.0.2.1:9912": false,
++		"localhost:9912": false,
++		"9912":           false,
++	} {
++		if err := loopback(addr); (err == nil) != ok {
++			t.Errorf("loopback(%q) = %v, want ok=%v", addr, err, ok)
++		}
++	}
++}
++
++func TestTheAdminAPIRefusesWhatItCannotDo(t *testing.T) {
++	api := admin(&testcontrol.Server{})
++	for _, c := range []struct {
++		method, target string
++		status         int
++	}{
++		{"GET", "/nodes", http.StatusOK},
++		{"POST", "/login?url=http://127.0.0.1/auth/missing", http.StatusNotFound},
++		{"POST", "/tags?name=absent&tag=tag:ci", http.StatusNotFound},
++		{"POST", "/share?name=absent&sharer=7", http.StatusNotFound},
++		{"POST", "/share?name=absent&sharer=someone", http.StatusBadRequest},
++		{"POST", "/expire?name=absent&expired=maybe", http.StatusBadRequest},
++		{"POST", "/expire?name=absent&expired=true", http.StatusNotFound},
++		{"POST", "/debug-exit?name=absent&code=1", http.StatusNotFound},
++		{"POST", "/debug-exit?name=absent&code=x", http.StatusBadRequest},
++		{"GET", "/login", http.StatusMethodNotAllowed},
++	} {
++		w := httptest.NewRecorder()
++		api.ServeHTTP(w, httptest.NewRequest(c.method, c.target, nil))
++		if w.Code != c.status {
++			t.Errorf("%s %s = %d, want %d: %s", c.method, c.target, w.Code, c.status, w.Body)
++		}
++	}
++	w := httptest.NewRecorder()
++	api.ServeHTTP(w, httptest.NewRequest("GET", "/nodes", nil))
++	var nodes []node
++	if err := json.Unmarshal(w.Body.Bytes(), &nodes); err != nil || len(nodes) != 0 {
++		t.Errorf("GET /nodes on an empty tailnet = %q, %v", w.Body, err)
++	}
++}
